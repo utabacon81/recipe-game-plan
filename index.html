@@ -1,0 +1,708 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Recipe Game Plan</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#1E1C1A; --panel:#272421; --line:#3A3632; --text:#F4EFE8; --muted:#BDB4A9;
+    --accent:#F08A3C; --done:#7FB5A8; --warn:#E06C5A; --all:#9DB4D6;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);color:var(--text);font-family:Inter,system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+  body{min-height:100vh;display:flex;flex-direction:column}
+  button{font-family:inherit}
+  header{position:sticky;top:0;z-index:5;background:var(--bg);border-bottom:1px solid var(--line);padding:12px 16px 10px}
+  .top{display:flex;align-items:center;justify-content:space-between;gap:12px;max-width:720px;margin:0 auto}
+  .brand{font-family:Oswald,sans-serif;font-weight:600;letter-spacing:3px;text-transform:uppercase;font-size:14px;color:var(--accent)}
+  .tools{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+  .chip-btn{background:none;border:1px solid var(--line);color:var(--text);border-radius:20px;padding:8px 14px;font:500 14px Inter,sans-serif;min-height:40px;cursor:pointer}
+  .chip-btn:hover{border-color:var(--muted)}
+  .chip-btn.set{border-color:var(--accent);color:var(--accent)}
+  @media (max-width:420px){ .chip-btn{padding:8px 10px;font-size:13px} .brand{font-size:12px;letter-spacing:2px} }
+  .timeline{display:flex;gap:6px;overflow-x:auto;max-width:720px;margin:10px auto 0;padding-bottom:4px;scrollbar-width:none}
+  .timeline::-webkit-scrollbar{display:none}
+  .tl{flex:0 0 auto;border:1px solid var(--line);background:var(--panel);color:var(--muted);border-radius:8px;padding:8px 10px;font:600 14px Oswald,sans-serif;letter-spacing:.5px;min-height:40px;cursor:pointer}
+  .tl.cur{background:var(--accent);border-color:var(--accent);color:#1E1C1A}
+  .tl.complete:not(.cur){color:var(--done);border-color:#3f5a53}
+  main{flex:1;width:100%;max-width:720px;margin:0 auto;padding:20px 16px 120px}
+  .when{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap}
+  .time{font-family:Oswald,sans-serif;font-weight:700;font-size:56px;line-height:1;color:var(--accent)}
+  .count{color:var(--muted);font-size:15px}
+  .headline{margin:8px 0 4px;font-size:20px;font-weight:600;line-height:1.35}
+  .progress{height:6px;background:var(--line);border-radius:3px;margin:16px 0 20px;overflow:hidden}
+  .progress>div{height:100%;background:var(--done);transition:width .2s}
+  .group{margin-top:22px}
+  .tag{display:inline-flex;align-items:center;gap:8px;font:600 13px Oswald,sans-serif;letter-spacing:2px;text-transform:uppercase;margin-bottom:8px}
+  .tag i{width:10px;height:10px;border-radius:5px;display:inline-block}
+  .ings{background:#2c2723;border:1px solid var(--line);border-left:4px solid var(--c,#888);border-radius:12px;padding:12px 14px;margin-bottom:10px}
+  .ings h4{margin:0 0 6px;font:600 12px Oswald,sans-serif;letter-spacing:2px;text-transform:uppercase;color:var(--muted)}
+  .ings ul{margin:0;padding:0;list-style:none}
+  .ings li{padding:5px 0;font-size:16px;line-height:1.35;border-top:1px solid #36312c}
+  .ings li:first-child{border-top:none}
+  .ings li.again{color:var(--muted)}
+  .badge{display:inline-block;margin-left:6px;padding:1px 7px;border-radius:10px;font:600 11px Inter,sans-serif;letter-spacing:.5px;text-transform:uppercase;vertical-align:2px}
+  .badge.p{background:#3f5a53;color:#CFE7E0}
+  .badge.a{background:#3A3632;color:var(--muted)}
+  .task{display:flex;gap:14px;align-items:flex-start;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:8px;cursor:pointer}
+  .task input{appearance:none;-webkit-appearance:none;flex:0 0 28px;width:28px;height:28px;margin:0;border:2px solid var(--muted);border-radius:7px;display:grid;place-content:center;cursor:pointer;background:transparent}
+  .task input:checked{background:var(--done);border-color:var(--done)}
+  .task input:checked::after{content:"";width:12px;height:7px;border-left:3px solid #1E1C1A;border-bottom:3px solid #1E1C1A;transform:translateY(-2px) rotate(-45deg)}
+  .task input:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+  .task .t{font-size:17px;font-weight:600;line-height:1.35}
+  .task .d{font-size:15px;color:var(--muted);line-height:1.45;margin-top:4px}
+  .task.checked .t,.task.checked .d{opacity:.45;text-decoration:line-through;text-decoration-thickness:1px}
+  .note{margin-top:22px;border:1px dashed #5a4a3c;border-radius:12px;padding:12px 14px;color:#E9CDB4;font-size:15px;line-height:1.45}
+  .note b{color:var(--accent)}
+  .status{margin-top:16px;border-radius:12px;padding:12px 14px;font-size:15px;line-height:1.45;background:var(--panel);border:1px solid var(--line)}
+  .status b{color:var(--accent)}
+  .status.late b{color:var(--warn)}
+  .status.ok b{color:var(--done)}
+  .big{width:100%;min-height:56px;border-radius:14px;border:1px solid var(--accent);background:none;color:var(--accent);font:600 18px Oswald,sans-serif;letter-spacing:1px;text-transform:uppercase;cursor:pointer;margin-top:16px}
+  .big.solid{background:var(--accent);color:#1E1C1A}
+  .big:disabled{opacity:.35;cursor:default}
+  nav{position:fixed;left:0;right:0;bottom:0;background:linear-gradient(transparent,var(--bg) 30%);padding:24px 16px calc(16px + env(safe-area-inset-bottom))}
+  .navin{display:flex;gap:10px;max-width:720px;margin:0 auto}
+  .nb{flex:1;min-height:56px;border-radius:14px;border:1px solid var(--line);background:var(--panel);color:var(--text);font:600 18px Oswald,sans-serif;letter-spacing:1px;text-transform:uppercase;cursor:pointer}
+  .nb.next{flex:2;background:var(--accent);border-color:var(--accent);color:#1E1C1A}
+  .nb:disabled{opacity:.35;cursor:default}
+  /* setup */
+  h2{font:600 15px Oswald,sans-serif;letter-spacing:2px;text-transform:uppercase;color:var(--muted);margin:28px 0 10px}
+  h2:first-child{margin-top:4px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px}
+  .field{width:100%;min-height:52px;border-radius:12px;border:1px solid var(--line);background:var(--bg);color:var(--text);font:500 16px Inter,sans-serif;padding:12px 14px}
+  textarea.field{min-height:180px;resize:vertical;line-height:1.45}
+  .row{display:flex;gap:10px}
+  .row .field{flex:1}
+  .btn{min-height:52px;border-radius:12px;border:1px solid var(--line);background:none;color:var(--text);font:600 16px Inter,sans-serif;padding:0 16px;cursor:pointer}
+  .btn.go{background:var(--accent);border-color:var(--accent);color:#1E1C1A}
+  .btn.sm{min-height:40px;font-size:14px;padding:0 12px}
+  .btn.del{color:#F0A99D;border-color:#5a3a35}
+  .linkbtn{background:none;border:none;color:var(--accent);font:500 15px Inter,sans-serif;padding:10px 0;cursor:pointer;text-decoration:underline;text-underline-offset:3px}
+  .msg{margin-top:10px;font-size:15px;line-height:1.45}
+  .msg.err{color:#F0A99D}
+  .msg.ok{color:var(--done)}
+  .rc{background:var(--panel);border:1px solid var(--line);border-left:5px solid var(--c);border-radius:14px;padding:14px;margin-bottom:10px}
+  .rc .nm{font-size:18px;font-weight:600;line-height:1.3}
+  .rc .meta{color:var(--muted);font-size:14px;margin-top:4px;line-height:1.4;word-break:break-word}
+  .rc .acts{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}
+  .rv{margin-top:12px;border-top:1px solid var(--line);padding-top:10px}
+  .rv .st{display:flex;gap:12px;align-items:flex-start;padding:10px 0;border-bottom:1px solid #332f2b}
+  .rv .st:last-child{border-bottom:none}
+  .rv .st .tx{flex:1;font-size:14px;line-height:1.45;color:var(--text)}
+  .rv .st .tx b{color:var(--muted);font-weight:600}
+  .rv .st input{width:76px;min-height:44px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--text);font:600 16px Inter,sans-serif;text-align:center}
+  .rv .st input.edited{border-color:var(--accent);color:var(--accent)}
+  .rv .st .u{font-size:12px;color:var(--muted);text-align:center;margin-top:3px}
+  .empty{color:var(--muted);font-size:15px;line-height:1.5;padding:4px 0}
+  .readyrow{display:flex;gap:10px;align-items:center}
+  .readyrow input{flex:1;min-height:52px;border-radius:12px;border:1px solid var(--line);background:var(--bg);color:var(--text);font:600 20px Inter,sans-serif;padding:0 14px;color-scheme:dark}
+  .hint{color:var(--muted);font-size:14px;line-height:1.45;margin-top:8px}
+  .modal{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none;align-items:center;justify-content:center;padding:24px;z-index:10}
+  .modal.open{display:flex}
+  .box{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:20px;max-width:360px;width:100%}
+  .box p{margin:0 0 16px;line-height:1.45}
+  .box .row button{flex:1}
+</style>
+</head>
+<body>
+<header>
+  <div class="top">
+    <div class="brand">Game Plan</div>
+    <div class="tools" id="tools"></div>
+  </div>
+  <div class="timeline" id="timeline" role="tablist" aria-label="Time blocks"></div>
+</header>
+
+<main id="main" aria-live="polite"></main>
+
+<nav id="nav">
+  <div class="navin">
+    <button class="nb" id="prev" type="button">Prev</button>
+    <button class="nb next" id="next" type="button">Next</button>
+  </div>
+</nav>
+
+<div class="modal" id="modal" role="dialog" aria-modal="true" aria-labelledby="mtext">
+  <div class="box">
+    <p id="mtext"></p>
+    <div class="row">
+      <button type="button" class="btn" id="mCancel">Cancel</button>
+      <button type="button" class="btn go" id="mOk">OK</button>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ============================================================
+   Storage
+   ============================================================ */
+const KEY = "recipe-game-plan-v1";
+let S = { view:"setup", recipes:[], target:null, startAt:null, idx:0, done:{}, open:{} };
+try { const s = JSON.parse(localStorage.getItem(KEY)); if (s && Array.isArray(s.recipes)) S = Object.assign(S, s); } catch(e) {}
+function save(){ try { localStorage.setItem(KEY, JSON.stringify(S)); } catch(e) {} }
+
+const COLORS = ["#E06C5A","#E5B94E","#7FB57A","#9DB4D6","#C98B5A","#C792EA","#5FC4C4","#F29BB3"];
+function esc(s){ return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
+
+/* ============================================================
+   Text helpers
+   ============================================================ */
+const UNI = {"½":.5,"⅓":1/3,"⅔":2/3,"¼":.25,"¾":.75,"⅛":.125,"⅜":.375,"⅝":.625,"⅞":.875,"⅕":.2};
+function normNum(s){
+  s = s.replace(/(\d*)\s?([½⅓⅔¼¾⅛⅜⅝⅞⅕])/g,(m,a,f)=>" "+String(+((+a||0)+UNI[f]).toFixed(3)));
+  s = s.replace(/(\d+)\s+(\d+)\s*\/\s*(\d+)/g,(m,a,b,c)=>String(+(+a + b/c).toFixed(3)));
+  s = s.replace(/(\d+)\s*\/\s*(\d+)/g,(m,a,b)=>String(+(a/b).toFixed(3)));
+  return s.replace(/\s+/g," ").trim();
+}
+function decode(s){
+  if (s==null) return "";
+  const d = new DOMParser().parseFromString("<!doctype html><body>"+String(s), "text/html");
+  return (d.body.textContent || "").replace(/\u00a0/g," ").replace(/\s+/g," ").trim();
+}
+function sentences(t){
+  return t.split(/(?<=[.!?])\s+(?=[A-Z0-9"“(])/).map(x=>x.trim()).filter(Boolean);
+}
+
+/* ---------- durations ---------- */
+const WORDNUM = {one:1,two:2,three:3,four:4,five:5,six:6,seven:7,eight:8,nine:9,ten:10,eleven:11,twelve:12,fifteen:15,twenty:20,thirty:30,forty:40,"forty-five":45,sixty:60};
+function durMin(sent){
+  let s = normNum(sent.toLowerCase())
+    .replace(/half an hour/g,"30 minutes")
+    .replace(/\b(an|a) hour\b/g,"1 hour")
+    .replace(/\b(forty-five|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fifteen|twenty|thirty|forty|sixty)\b/g,w=>WORDNUM[w]);
+  if (/\bovernight\b/.test(s)) return 480;
+  s = s.replace(/(\d+(?:\.\d+)?)\s*(?:hours?|hrs?)\s*(?:and\s*)?(\d+)\s*(?:minutes?|mins?)/g,(m,h,mm)=>(h*60 + +mm)+" minutes");
+  const re = /(every\s+)?(\d+(?:\.\d+)?)(?:\s*(?:-|–|to|or)\s*(\d+(?:\.\d+)?))?\s*(hours?|hrs?|minutes?|mins?|seconds?|secs?)\b(\s*(?:per|on each|each)\s+side)?/g;
+  let best = 0, m;
+  while ((m = re.exec(s))) {
+    if (m[1]) continue;
+    let v = +(m[3] || m[2]); const u = m[4];
+    v = u[0]==="h" ? v*60 : u[0]==="s" ? v/60 : v;
+    if (m[5]) v *= 2;
+    best = Math.max(best, v);
+  }
+  return Math.round(best);
+}
+function isoMin(iso){
+  const m = /P(?:(\d+)D)?T?(?:(\d+)H)?(?:(\d+)M)?/i.exec(iso||"");
+  if (!m) return 0;
+  return (+m[1]||0)*1440 + (+m[2]||0)*60 + (+m[3]||0);
+}
+
+/* ---------- ingredients ---------- */
+const UNITS = ["fluid ounces?","fl\\.? ?oz","cups?","c","tablespoons?","tbsps?","tbs","tbl","T","teaspoons?","tsps?","t","ounces?","oz","pounds?","lbs?","grams?","g","kilograms?","kg","milliliters?","ml","liters?","litres?","l","quarts?","qts?","pints?","pts?","gallons?","cloves?","cans?","jars?","packages?","pkgs?","pkg","sticks?","slices?","pinch(?:es)?","dash(?:es)?","bunch(?:es)?","sprigs?","heads?","stalks?","ribs?","pieces?","bags?","bottles?","boxes?","handfuls?","envelopes?","sheets?","fillets?","links?","containers?","large","medium","small","whole","heaping","level","scant","generous"];
+const UNIT_RE = new RegExp("^(?:"+UNITS.join("|")+")\\.?\\s+","i");
+const PREP_CLAUSE = /\b(chop|chopped|dice|diced|mince|minced|slice|sliced|shred|shredded|grate|grated|cube|cubed|peel|peeled|halve|halved|quarter|quartered|soften|softened|melt|melted|beat|beaten|toast|toasted|julienne|julienned|trim|trimmed|rinse|rinsed|drain|drained|zested|juiced|thaw|thawed|crumble|crumbled|crush|crushed|smash|smashed|seeded|cored|pitted|cut|torn|pounded|mashed|sifted|patted|deveined|stemmed|room temperature|at room temp)\b/i;
+const LEAD_PREP = /^((?:(?:finely|thinly|coarsely|roughly|freshly|lightly|very)\s+)?(?:chopped|diced|minced|sliced|shredded|grated|cubed|peeled|halved|quartered|softened|melted|beaten|toasted|julienned|trimmed|crumbled|mashed|sifted|cooked)\s+(?:and\s+)?)+/i;
+const NOT_PREP = /\b(divided|to taste|for serving|for garnish|optional|plus more.*|as needed|or more.*)\b/gi;
+
+const PRODUCT = /^(diced|crushed|chopped|sliced|stewed|whole|shredded)\s+(tomato|green chil|chil|pineapple|olive|water chestnut|peach|beet|jalape|mushroom|coconut|wheat)/i;
+function parseIng(raw){
+  const line = decode(raw);
+  const parts = line.replace(/\([^)]*\)/g," ").replace(/\s+/g," ").trim().split(",");
+  let s = normNum(parts.shift() || "");
+  s = s.replace(/^[\d.\s-]+(?:(?:to|or|-|–)\s*[\d.]+)?\s*/,"");
+  let prev; do { prev = s; s = s.replace(UNIT_RE,""); } while (s !== prev);
+  let name = s.replace(/^of\s+/i,"");
+  const prep = [];
+  const lead = PRODUCT.test(name) ? null : name.match(LEAD_PREP);
+  if (lead) { prep.push(lead[0].trim()); name = name.slice(lead[0].length); }
+  parts.join(",").split(/[,;]/).forEach(c=>{
+    const t = c.replace(NOT_PREP,"").trim();
+    if (t && PREP_CLAUSE.test(t) && !PRODUCT.test(t)) prep.push(t);
+  });
+  name = name.replace(/\b(to taste|for serving|for garnish|optional)\b/gi,"").replace(/\s+/g," ").trim().toLowerCase();
+  return { raw: line, name: name || line.toLowerCase(), prep: prep.join(", ") };
+}
+
+const STOP = new Set(("fresh large small medium whole ground lean extra virgin boneless skinless bone low reduced sodium unsalted salted kosher sea table plain pure thick thin cut about divided optional taste garnish serving into pieces piece inch more plus and or the for with of to a an good quality homemade store bought dry dried packed light dark sweet hot mild warm cold room temperature finely thinly roughly coarsely chopped diced minced sliced shredded grated softened melted cooked smoked cured roasted toasted canned frozen black white red green yellow orange brown golden purple baby young new old fat free percent organic natural style can cans package").split(" "));
+const GENERIC = new Set("powder sauce oil juice seeds seed leaves leaf paste flakes extract pepper peppers vinegar mix water stock broth cream wine meat".split(" "));
+const CATS = [
+  [/\b(adjust|correct|check)\s+(the\s+)?seasoning|season(ed)? to taste|taste for seasoning/i, /\b(salt|pepper)\b/i],
+  [/\b(spices|seasonings|spice mix|spice blend|dry rub)\b/i, /\b(cumin|paprika|chili powder|chile powder|chipotle|oregano|thyme|cinnamon|nutmeg|cayenne|coriander|turmeric|curry|garam|allspice|cloves|ginger|mustard|pepper flakes|italian seasoning|onion powder|garlic powder|bay|sage|rosemary|fennel|cardamom|seasoning|salt|black pepper)\b/i],
+  [/\b(vegetables|veggies|aromatics)\b/i, /\b(onions?|garlic|bell peppers?|carrots?|celery|shallots?|leeks?|zucchini|mushrooms?|potatoes?|jalape[nñ]os?|poblanos?|scallions?)\b/i],
+  [/\bdry ingredients\b/i, /\b(flour|sugar|baking powder|baking soda|salt|cocoa|cornstarch|oats|cornmeal|yeast|spice)\b/i],
+  [/\bwet ingredients\b/i, /\b(milk|buttermilk|eggs?|butter|oil|vanilla|water|cream|yogurt|honey|syrup)\b/i],
+  [/\b(fresh )?herbs\b/i, /\b(parsley|basil|cilantro|thyme|rosemary|dill|mint|chives|sage|tarragon)\b/i],
+  [/\b(the )?meats?\b/i, /\b(beef|pork|chicken|turkey|sausage|lamb|veal|chorizo|bison)\b/i],
+  [/\bcheeses?\b/i, /\b(cheddar|mozzarella|parmesan|parmigiano|jack|gruy[eè]re|cheese|ricotta|feta|provolone|american|swiss|fontina|pecorino)\b/i],
+  [/\b(garnish(es)?|toppings?)\b/i, /./]
+];
+function sing(w){ return w.replace(/ies$/,"y").replace(/(oes|ches|shes|sses|xes)$/,m=>m.slice(0,-2)).replace(/([^s])s$/,"$1"); }
+function wordRe(w){ return new RegExp("\\b"+sing(w).replace(/[.*+?^${}()|[\]\\]/g,"\\$&")+"(?:e?s)?\\b","i"); }
+function phraseRe(p){
+  const ws = p.split(/\s+/); const last = ws.pop();
+  const pre = ws.map(x=>x.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")).join("\\s+");
+  return new RegExp("\\b"+(pre? pre+"\\s+" : "")+sing(last).replace(/[.*+?^${}()|[\]\\]/g,"\\$&")+"(?:e?s)?\\b","i");
+}
+
+/* ============================================================
+   Recipe model
+   r = { id, name, url, color, ings:[raw], steps:[{sents:[{t,m,pre}]}], over:{}, prepOver:null }
+   ============================================================ */
+function flatSteps(ri){
+  const out = [];
+  const add = x=>{
+    if (!x) return;
+    if (typeof x === "string") {
+      let t = x;
+      if (/\n/.test(t)) return t.split(/\n+/).forEach(add);
+      t = decode(t);
+      if (/(^|\s)\d+[.)]\s+\S/.test(t) && (t.match(/(^|\s)\d+[.)]\s/g)||[]).length > 1) {
+        t.split(/(?:^|\s)(?=\d+[.)]\s)/).forEach(p=>{ p=p.replace(/^\d+[.)]\s*/,"").trim(); if (p) out.push(p); });
+        return;
+      }
+      t = t.replace(/^(step\s*)?\d+[.):]\s*/i,"").trim();
+      if (t) out.push(t);
+      return;
+    }
+    if (Array.isArray(x)) return x.forEach(add);
+    if (x.itemListElement) return add(x.itemListElement);
+    if (x.text) return add(x.text);
+    if (x.name) return add(x.name);
+  };
+  add(ri);
+  return out;
+}
+function buildRecipe({name, url, ingredients, steps}){
+  const st = steps.map(text=>({ sents: sentences(text).map(t=>{
+    const pre = /\bpre-?heat\b/i.test(t);
+    const d = durMin(t);
+    return { t, m: pre ? 0 : (d || 2), timed: !!d && !pre, pre };
+  })})).filter(x=>x.sents.length);
+  return {
+    id: "r" + Date.now().toString(36) + Math.random().toString(36).slice(2,6),
+    name: (name || "Untitled recipe").trim(),
+    url: url || "",
+    color: COLORS[S.recipes.length % COLORS.length],
+    ings: ingredients.map(i=>decode(i)).filter(i=>i && !/:\s*$/.test(i)),
+    steps: st,
+    over: {}, prepOver: null
+  };
+}
+function fromJsonLd(r, url){
+  const ings = (Array.isArray(r.recipeIngredient) ? r.recipeIngredient : [r.recipeIngredient]).filter(Boolean);
+  return buildRecipe({ name: decode(r.name), url, ingredients: ings, steps: flatSteps(r.recipeInstructions) });
+}
+function fromText(text){
+  const lines = text.split(/\r?\n/).map(l=>l.trim());
+  let mode = null, title = "", ings = [], steps = [];
+  const isIngHead = l=>/^(ingredients?)\s*:?$/i.test(l);
+  const isStepHead = l=>/^(instructions?|directions?|method|preparation|steps|how to make( it)?)\s*:?$/i.test(l);
+  const hasHeads = lines.some(isIngHead) && lines.some(isStepHead);
+  for (const l of lines) {
+    if (!l) continue;
+    if (isIngHead(l)) { mode = "i"; continue; }
+    if (isStepHead(l)) { mode = "s"; continue; }
+    const clean = l.replace(/^[-•*▢☐□]\s*/,"");
+    if (!hasHeads) {
+      if (!title && !/^\d/.test(clean)) { title = clean; continue; }
+      if (/^([\d½⅓⅔¼¾⅛]|a pinch|salt|pinch)/i.test(clean) && clean.length < 120 && !/^\d+[.)]\s/.test(clean)) ings.push(clean);
+      else steps.push(clean.replace(/^(step\s*)?\d+[.):]\s*/i,""));
+      continue;
+    }
+    if (mode === "i") ings.push(clean);
+    else if (mode === "s") steps.push(clean.replace(/^(step\s*)?\d+[.):]\s*/i,""));
+    else if (!title) title = clean;
+  }
+  return buildRecipe({ name: title, ingredients: ings, steps: steps.filter(s=>s.length > 3) });
+}
+
+/* ---------- per-recipe timeline ---------- */
+function stepMin(r, i){ const o = r.over[i]; return (o!=null && o!=="") ? +o : r.steps[i].sents.reduce((a,s)=>a+s.m,0); }
+function prepItems(r){ return r.ings.map(parseIng).map((p,i)=>({...p, i})).filter(p=>p.prep); }
+function prepMin(r){ if (r.prepOver!=null && r.prepOver!=="") return +r.prepOver; const n = prepItems(r).length; return n ? Math.max(5, n*3) : 0; }
+
+function matchIngredients(r){
+  const parsed = r.ings.map(parseIng);
+  const texts = r.steps.map(st=>st.sents.filter(s=>!s.pre).map(s=>s.t).join(" "));
+  const hits = parsed.map(()=>[]);
+  parsed.forEach((p,ii)=>{
+    const words = p.name.split(/[^a-zñéèü'-]+/i).map(w=>w.toLowerCase()).filter(w=>w.length>=3 && !STOP.has(w));
+    const head = words[words.length-1];
+    const core = words.join(" ");
+    const tiers = [];
+    if (core && core.includes(" ")) tiers.push(t=>phraseRe(core).test(t));
+    if (p.name && p.name !== core && p.name.split(" ").length>1) tiers.push(t=>phraseRe(p.name).test(t));
+    if (head && !GENERIC.has(head)) tiers.push(t=>wordRe(head).test(t));
+    const isGarnish = /\b(for garnish|for serving|to serve|toppings?)\b/i.test(p.raw);
+    tiers.push(t=>CATS.some(([cue, member])=>cue.test(t) && (member.source==="." ? isGarnish : member.test(p.name))));
+    const others = words.filter(w=>w!==head && !GENERIC.has(w));
+    if (others.length) tiers.push(t=>others.some(w=>wordRe(w).test(t)));
+    if (head && GENERIC.has(head)) tiers.push(t=>wordRe(head).test(t));
+    for (const tier of tiers) {
+      const found = texts.map((t,si)=>tier(t)?si:-1).filter(x=>x>=0);
+      if (found.length) { hits[ii] = found; break; }
+    }
+  });
+  const remainingStep = texts.findIndex(t=>/\b(remaining ingredients|everything else|all (of )?the (remaining )?ingredients|rest of the ingredients)\b/i.test(t));
+  parsed.forEach((p,ii)=>{ if (!hits[ii].length) hits[ii] = [remainingStep>=0 ? remainingStep : 0]; });
+  return { parsed, hits };
+}
+
+function recipePlan(r){
+  const { parsed, hits } = matchIngredients(r);
+  const blocks = [];
+  let off = 0;
+  const pm = prepMin(r);
+  const pitems = prepItems(r);
+  const prep = pitems.length ? { dur:pm,
+      ings: pitems.map(p=>({raw:p.raw, prepped:false})),
+      tasks: pitems.map(p=>[r.id+":p:"+p.i, (/\b(for garnish|for serving|to serve|toppings?)\b/i.test(p.raw) ? "Garnishes" : cap(p.name))+": "+p.prep, ""]).concat([[r.id+":p:gather","Measure out everything else for this recipe",""]]) } : null;
+  const preheats = [];
+  const firstSeen = {};
+  const lastReal = r.steps.map((st,si)=>st.sents.some(s=>!s.pre)?si:-1).filter(x=>x>=0).pop();
+  let servedInSteps = false;
+  r.steps.forEach((st,si)=>{
+    const real = st.sents.filter(s=>!s.pre);
+    st.sents.filter(s=>s.pre).forEach(s=>preheats.push({si, t:s.t}));
+    if (!real.length) return;
+    let dur = stepMin(r, si);
+    /* A short closing "serve with..." step lands right at the ready time. */
+    if (si === lastReal && /\bserve\b/i.test(real.map(s=>s.t).join(" ")) && !real.some(s=>s.timed) && r.over[si]==null) { dur = 0; servedInSteps = true; }
+    const ings = [];
+    parsed.forEach((p,ii)=>{
+      if (!hits[ii].includes(si)) return;
+      const again = firstSeen[ii]!==undefined;
+      if (!again) firstSeen[ii] = si;
+      ings.push({ raw: again ? p.name : p.raw, prepped: !again && !!p.prep, again });
+    });
+    blocks.push({ off, dur, kind:"step", si, ings,
+      tasks: real.map((s,ti)=>[r.id+":"+si+":"+ti, s.t, s.timed ? "About "+fmtDur(s.m) : ""]) });
+    off += dur;
+  });
+  const total = off;
+  preheats.forEach((ph,k)=>{
+    const ovenBlock = blocks.find(b=>b.kind==="step" && b.si>ph.si && /\b(bake|roast|oven|broil)\b/i.test(b.tasks.map(t=>t[1]).join(" ")))
+                   || blocks.find(b=>b.kind==="step" && b.si>=ph.si);
+    const at = ovenBlock ? ovenBlock.off - 15 : 0;  /* may be negative: preheat during prep */
+    blocks.push({ off:at, dur:0, kind:"preheat", ings:[], tasks:[[r.id+":h:"+k, ph.t, "Most ovens need about 15 minutes to heat."]] });
+  });
+  if (!servedInSteps) blocks.push({ off:total, dur:0, kind:"serve", ings:[], tasks:[[r.id+":s","Plate and serve",""]] });
+  return { total, prepDur: prep ? pm : 0, prep, blocks };
+}
+function cap(s){ s = String(s||""); return s.charAt(0).toUpperCase() + s.slice(1); }
+function fmtDur(m){ m=Math.round(m); const h=Math.floor(m/60), mm=m%60; return h ? h+" hr"+(mm? " "+mm+" min":"") : mm+" min"; }
+
+/* ---------- meal plan (all recipes finish together) ---------- */
+let PLAN = { total:0, blocks:[] };
+function buildPlan(){
+  const plans = S.recipes.map(r=>({ r, p: recipePlan(r) }));
+  /* All prep happens first, as one block. Then each recipe's cooking is timed to end together. */
+  const prepTotal = plans.reduce((a,x)=>a+x.p.prepDur,0);
+  const total = prepTotal + Math.max(0, ...plans.map(x=>x.p.total));
+  const byOff = new Map();
+  plans.forEach(({r,p})=>{
+    const shift = total - p.total;
+    const list = p.prep ? [{ off:-shift, dur:prepTotal, kind:"prep", ings:p.prep.ings, tasks:p.prep.tasks }, ...p.blocks] : p.blocks;
+    list.forEach(b=>{
+      const abs = Math.max(0, Math.round(shift + b.off));
+      if (!byOff.has(abs)) byOff.set(abs, { off:abs, groups:[], kinds:new Set(), dur:0 });
+      const B = byOff.get(abs);
+      B.kinds.add(b.kind); B.dur = Math.max(B.dur, b.dur);
+      let g = B.groups.find(x=>x.rid===r.id);
+      if (!g) { g = { rid:r.id, label:r.name, color:r.color, ings:[], tasks:[] }; B.groups.push(g); }
+      g.ings.push(...b.ings); g.tasks.push(...b.tasks);
+    });
+  });
+  const blocks = [...byOff.values()].sort((a,b)=>a.off-b.off);
+  blocks.forEach(B=>{
+    if (B.kinds.size===1 && B.kinds.has("serve")) B.headline = "Ready. Plate and serve.";
+    else if (B.kinds.has("prep")) B.headline = "Prep work. Get everything cut and measured.";
+    else if (B.groups.length > 1) B.headline = B.groups.map(g=>g.label).join(" + ");
+    else { const t = B.groups[0].tasks[0][1]; B.headline = t.length > 90 ? t.slice(0,87).replace(/\s+\S*$/,"")+"…" : t; }
+  });
+  PLAN = { total, blocks };
+  if (S.idx >= blocks.length) S.idx = 0;
+}
+
+/* ============================================================
+   Time
+   ============================================================ */
+function anchor(){ if (S.startAt) return S.startAt; if (S.target) return S.target - PLAN.total*60000; return null; }
+function fmt(ms, withDay){
+  const d = new Date(ms);
+  let h = d.getHours(), m = d.getMinutes(), ap = h>=12 ? "pm" : "am";
+  h = h%12 || 12;
+  let s = h + ":" + String(m).padStart(2,"0") + ap;
+  if (withDay) {
+    const t0 = new Date(); t0.setHours(0,0,0,0);
+    const d0 = new Date(ms); d0.setHours(0,0,0,0);
+    const diff = Math.round((d0 - t0)/86400000);
+    s += diff===0 ? " today" : diff===1 ? " tomorrow" : diff===-1 ? " yesterday" : " " + d.toLocaleDateString([], {weekday:"short"});
+  }
+  return s;
+}
+function rel(off){ const h=Math.floor(off/60), m=off%60; return "+" + h + ":" + String(m).padStart(2,"0"); }
+function label(B){ const a = anchor(); return a ? fmt(a + B.off*60000) : rel(B.off); }
+
+/* ============================================================
+   Rendering
+   ============================================================ */
+const main = document.getElementById("main"), tl = document.getElementById("timeline"), tools = document.getElementById("tools"), nav = document.getElementById("nav");
+
+function renderTools(){
+  if (S.view === "setup") { tools.innerHTML = S.recipes.length ? `<button class="chip-btn" data-act="cook" type="button">Cook view</button>` : ""; return; }
+  tools.innerHTML = `<button class="chip-btn" data-act="setup" type="button">Recipes</button>`
+    + `<button class="chip-btn ${S.target?"set":""}" data-act="ready" type="button">${S.target ? "Ready "+fmt(S.target) : "Ready by"}</button>`
+    + (anchor() ? `<button class="chip-btn" data-act="now" type="button">Now</button>` : "")
+    + `<button class="chip-btn" data-act="reset" type="button">Reset</button>`;
+}
+
+function render(){
+  renderTools();
+  if (S.view === "setup") return renderSetup();
+  renderCook();
+}
+
+/* ---------- setup ---------- */
+let importMsg = "", importErr = false, busy = false, pasteOpen = false;
+function totalFor(r){ const p = recipePlan(r); return p.total + p.prepDur; }
+function renderSetup(){
+  tl.innerHTML = ""; tl.style.display = "none"; nav.style.display = "none";
+  let h = `<h2>Add a recipe</h2>
+  <div class="card">
+    <form id="urlForm" class="row" autocomplete="off">
+      <input class="field" id="url" type="url" inputmode="url" placeholder="Paste a recipe link" aria-label="Recipe link">
+      <button class="btn go" type="submit" ${busy?"disabled":""}>${busy?"Reading":"Import"}</button>
+    </form>
+    ${importMsg ? `<div class="msg ${importErr?"err":"ok"}">${esc(importMsg)}</div>` : ""}
+    <button class="linkbtn" type="button" data-act="togglePaste">${pasteOpen ? "Hide paste box" : "Or paste the recipe text"}</button>
+    ${pasteOpen ? `<textarea class="field" id="paste" placeholder="Paste the title, ingredients and instructions. Headings like Ingredients and Instructions help."></textarea>
+      <div class="row" style="margin-top:10px"><button class="btn go" type="button" data-act="addPaste" style="flex:1">Add recipe</button></div>` : ""}
+  </div>`;
+
+  h += `<h2>This meal</h2>`;
+  if (!S.recipes.length) h += `<div class="empty">No recipes yet. Add one or more and they'll be timed to finish together.</div>`;
+  S.recipes.forEach((r,ri)=>{
+    const t = totalFor(r);
+    const open = !!S.open[r.id];
+    h += `<div class="rc" style="--c:${r.color}">
+      <div class="nm">${esc(r.name)}</div>
+      <div class="meta">${r.ings.length} ingredients · ${r.steps.length} steps · ${fmtDur(t)} planned${r.url ? `<br><a href="${esc(r.url)}" style="color:var(--muted)">${esc(r.url.replace(/^https?:\/\/(www\.)?/,"").slice(0,60))}</a>` : ""}</div>
+      <div class="acts">
+        <button class="btn sm" type="button" data-act="review" data-id="${r.id}">${open ? "Close times" : "Review times"}</button>
+        <button class="btn sm" type="button" data-act="rename" data-id="${r.id}">Rename</button>
+        <button class="btn sm del" type="button" data-act="remove" data-id="${r.id}">Remove</button>
+      </div>`;
+    if (open) {
+      h += `<div class="rv"><div class="hint" style="margin:0 0 6px">Minutes come from the recipe text. Fix any that look off; an orange box is your override. Clear it to go back to the estimate.</div>`;
+      if (prepItems(r).length) {
+        const auto = (()=>{ const n = prepItems(r).length; return Math.max(5, n*3); })();
+        h += `<div class="st"><div class="tx"><b>Prep</b> · ${prepItems(r).map(p=>esc(p.name)).join(", ")}</div>
+          <div><input type="number" min="0" inputmode="numeric" data-prep="${r.id}" value="${r.prepOver!=null && r.prepOver!=="" ? r.prepOver : auto}" class="${r.prepOver!=null && r.prepOver!=="" ? "edited":""}" aria-label="Prep minutes"><div class="u">min</div></div></div>`;
+      }
+      r.steps.forEach((st,si)=>{
+        const auto = st.sents.reduce((a,s)=>a+s.m,0);
+        const ov = r.over[si]!=null && r.over[si]!=="";
+        const text = st.sents.map(s=>s.t).join(" ");
+        h += `<div class="st"><div class="tx"><b>Step ${si+1}</b> · ${esc(text.length>220 ? text.slice(0,217)+"…" : text)}</div>
+          <div><input type="number" min="0" inputmode="numeric" data-step="${r.id}:${si}" value="${ov ? r.over[si] : auto}" class="${ov?"edited":""}" aria-label="Step ${si+1} minutes"><div class="u">min</div></div></div>`;
+      });
+      h += `</div>`;
+    }
+    h += `</div>`;
+  });
+
+  if (S.recipes.length) {
+    h += `<h2>Ready by</h2>
+    <div class="card">
+      <div class="readyrow"><input type="time" id="readyIn" step="300" value="${S.target ? hhmm(S.target) : ""}" aria-label="Ready by time">
+      ${S.target ? `<button class="btn" type="button" data-act="clearReady">Clear</button>` : ""}</div>
+      <div class="hint">${S.target ? `Start at <b style="color:var(--accent)">${fmt(S.target - PLAN.total*60000, true)}</b> to have everything ready at ${fmt(S.target, true)}. Total plan: ${fmtDur(PLAN.total)}.` : `Optional. Set it and every step gets a clock time. Total plan: ${fmtDur(PLAN.total)}.`}</div>
+    </div>
+    <button class="big solid" type="button" data-act="cook">Build the game plan</button>`;
+  } else {
+    h += `<button class="linkbtn" type="button" data-act="sample">Try it with a sample recipe</button>`;
+  }
+  main.innerHTML = h;
+}
+function hhmm(ms){ const d=new Date(ms); return String(d.getHours()).padStart(2,"0")+":"+String(d.getMinutes()).padStart(2,"0"); }
+
+/* ---------- cook ---------- */
+function blockIds(B){ return B.groups.flatMap(g=>g.tasks.map(t=>t[0])); }
+function complete(B){ return blockIds(B).every(id=>S.done[id]); }
+function mins(n){ return fmtDur(Math.abs(Math.round(n))); }
+function statusHtml(i){
+  const a = anchor(); if (!a) return "";
+  if (!S.startAt) return i===0 ? `<div class="status">Start this at <b>${fmt(a, true)}</b> to be ready at <b>${fmt(S.target, true)}</b>.</div>` : "";
+  if (!S.target) return "";
+  const proj = S.startAt + PLAN.total*60000, diff = (proj - S.target)/60000;
+  if (Math.abs(diff) < 3) return `<div class="status ok">On track for <b>${fmt(S.target)}</b>.</div>`;
+  if (diff > 0) return `<div class="status late">Started <b>${mins(diff)} late</b>. Projected ready ${fmt(proj)}.</div>`;
+  return `<div class="status ok">Started <b>${mins(diff)} early</b>. Projected ready ${fmt(proj)}. Hold finished food warm until ${fmt(S.target)}.</div>`;
+}
+function renderCook(){
+  tl.style.display = ""; nav.style.display = "";
+  const blocks = PLAN.blocks;
+  if (!blocks.length) { S.view = "setup"; return render(); }
+  const B = blocks[S.idx];
+  tl.innerHTML = blocks.map((x,i)=>`<button type="button" role="tab" aria-selected="${i===S.idx}" class="tl ${i===S.idx?"cur":""} ${complete(x)?"complete":""}" data-i="${i}">${label(x)}${complete(x)?" ✓":""}</button>`).join("");
+  const all = blockIds(B), n = all.filter(id=>S.done[id]).length;
+  const a = anchor();
+  const big = a ? fmt(a + B.off*60000) : rel(B.off);
+  const dayNote = a && fmt(a + B.off*60000, true).split(" ")[1] !== "today" ? " · " + fmt(a + B.off*60000, true).split(" ").slice(1).join(" ") : "";
+  let h = `<div class="when"><div class="time">${big}</div><div class="count">Step ${S.idx+1} of ${blocks.length} · ${n}/${all.length} done${a ? " · "+rel(B.off)+" from start" : ""}${dayNote}${B.dur ? " · about "+fmtDur(B.dur) : ""}</div></div>
+    <div class="headline">${esc(B.headline)}</div>
+    ${statusHtml(S.idx)}
+    <div class="progress"><div style="width:${all.length ? n/all.length*100 : 0}%"></div></div>`;
+  B.groups.forEach(g=>{
+    h += `<section class="group"><div class="tag" style="color:${g.color}"><i style="background:${g.color}"></i>${esc(g.label)}</div>`;
+    if (g.ings.length) {
+      h += `<div class="ings" style="--c:${g.color}"><h4>You'll need</h4><ul>` + g.ings.map(x=>
+        `<li class="${x.again?"again":""}">${esc(x.raw)}${x.prepped ? `<span class="badge p">prepped</span>` : ""}${x.again ? `<span class="badge a">again</span>` : ""}</li>`).join("") + `</ul></div>`;
+    }
+    g.tasks.forEach(t=>{
+      const on = !!S.done[t[0]];
+      h += `<label class="task ${on?"checked":""}"><input type="checkbox" data-id="${esc(t[0])}" ${on?"checked":""}><div><div class="t">${esc(t[1])}</div>${t[2] ? `<div class="d">${esc(t[2])}</div>` : ""}</div></label>`;
+    });
+    h += `</section>`;
+  });
+  if (S.idx === 0 && !S.startAt) h += `<button class="big" type="button" data-act="start">Start the clock · I'm starting now</button>`;
+  if (S.idx === 0 && S.startAt) h += `<div class="note"><b>Clock started at ${fmt(S.startAt)}.</b> Times follow your actual start.</div>`;
+  if (S.idx < blocks.length-1) { const nx = blocks[S.idx+1]; h += `<div class="note"><b>Up next at ${label(nx)}:</b> ${esc(nx.headline)}</div>`; }
+  main.innerHTML = h;
+  document.getElementById("prev").disabled = S.idx===0;
+  const nb = document.getElementById("next");
+  nb.disabled = S.idx===blocks.length-1;
+  nb.textContent = S.idx===blocks.length-1 ? "Enjoy" : "Next · " + label(blocks[S.idx+1]);
+  const cur = tl.querySelector(".cur"); if (cur) cur.scrollIntoView({inline:"center", block:"nearest"});
+}
+
+function go(i){ S.idx = Math.max(0, Math.min(PLAN.blocks.length-1, i)); save(); render(); window.scrollTo(0,0); }
+
+/* ============================================================
+   Modal (confirm / prompt)
+   ============================================================ */
+const modal = document.getElementById("modal"), mtext = document.getElementById("mtext");
+let modalOk = null;
+function ask(html, okLabel, onOk){ mtext.innerHTML = html; document.getElementById("mOk").textContent = okLabel; modalOk = onOk; modal.classList.add("open"); const f = modal.querySelector("input"); if (f) f.focus(); }
+document.getElementById("mCancel").onclick = ()=>modal.classList.remove("open");
+document.getElementById("mOk").onclick = ()=>{ const f = modalOk; modal.classList.remove("open"); if (f) f(); };
+document.addEventListener("keydown", e=>{ if (e.key==="Escape") modal.classList.remove("open"); });
+
+/* ============================================================
+   Actions
+   ============================================================ */
+async function importUrl(u){
+  busy = true; importMsg = ""; render();
+  try {
+    const res = await fetch("/api/recipe?url=" + encodeURIComponent(u));
+    let data = null; try { data = await res.json(); } catch(e) {}
+    if (!res.ok || !data || !data.recipe) throw new Error((data && data.error) || "Import only works on the hosted site. Paste the recipe text instead.");
+    const r = fromJsonLd(data.recipe, data.url || u);
+    if (!r.steps.length || !r.ings.length) throw new Error("Found the recipe but couldn't read its ingredients or steps. Paste the text instead.");
+    S.recipes.push(r); S.open[r.id] = true; afterChange();
+    importMsg = `Added ${r.name}. Check the step times below.`; importErr = false;
+  } catch(e) {
+    importMsg = e.message || String(e); importErr = true; pasteOpen = true;
+  }
+  busy = false; render();
+}
+function afterChange(){ buildPlan(); S.done = {}; S.idx = 0; S.startAt = null; save(); }
+
+const SAMPLE = `Pat's Beef and Pork Chili
+Ingredients
+6 slices thick-cut applewood smoked bacon, cut into 1/2-inch pieces
+4 cloves garlic, finely chopped
+2 medium onions, finely chopped
+1 red bell pepper, chopped
+1 yellow bell pepper, chopped
+3 tablespoons chili powder
+1 tablespoon ground cumin
+1 tablespoon chipotle chili powder
+2 teaspoons dried oregano
+1 tablespoon smoked paprika
+Salt and freshly ground black pepper
+1 pound 85% lean ground beef
+1 pound ground pork
+1 1/2 cups beer
+12 ounces dry chili mix beans, brined overnight and drained
+24 ounces crushed tomatoes
+24 ounces diced tomatoes, with juice
+Lime wedges, sour cream, shredded Cheddar and sliced scallions, for garnish
+Instructions
+Cover the beans with water by 2 inches and bring to a full rolling boil for 10 minutes. Reduce to a gentle simmer until tender, 45 to 60 minutes. Drain.
+In a Dutch oven over medium heat, cook the bacon until lightly crisp, about 8 minutes.
+Add the garlic, onions, bell peppers and spices. Season with salt and pepper and cook until the vegetables are tender, about 8 minutes.
+Add the beef and break it up. When it starts to brown, add the pork and cook until no longer pink, about 4 minutes.
+Stir in the beer and beans, then add the crushed and diced tomatoes.
+Reduce the heat to low and simmer for 1 1/2 hours. Adjust the seasoning.
+Serve with the garnishes.`;
+
+document.addEventListener("submit", e=>{
+  if (e.target.id !== "urlForm") return;
+  e.preventDefault();
+  const u = document.getElementById("url").value.trim();
+  if (u) importUrl(u);
+});
+document.addEventListener("click", e=>{
+  const t = e.target.closest("[data-act]");
+  if (t) {
+    const act = t.dataset.act, id = t.dataset.id;
+    const r = id && S.recipes.find(x=>x.id===id);
+    if (act==="togglePaste") { pasteOpen = !pasteOpen; render(); }
+    else if (act==="addPaste" || act==="sample") {
+      const text = act==="sample" ? SAMPLE : (document.getElementById("paste")||{}).value || "";
+      const rec = fromText(text);
+      if (!rec.ings.length || !rec.steps.length) { importMsg = "Couldn't find both ingredients and steps. Put an Ingredients heading and an Instructions heading above each list."; importErr = true; render(); return; }
+      S.recipes.push(rec); S.open[rec.id] = true; afterChange();
+      importMsg = `Added ${rec.name}. Check the step times below.`; importErr = false; pasteOpen = false; render();
+    }
+    else if (act==="review" && r) { S.open[id] = !S.open[id]; save(); render(); }
+    else if (act==="remove" && r) ask(`Remove <b>${esc(r.name)}</b> from this meal?`, "Remove", ()=>{ S.recipes = S.recipes.filter(x=>x.id!==id); delete S.open[id]; afterChange(); render(); });
+    else if (act==="rename" && r) ask(`<label for="rn" style="display:block;margin-bottom:8px;color:var(--muted)">Recipe name</label><input class="field" id="rn" value="${esc(r.name)}">`, "Save", ()=>{ const v = document.getElementById("rn").value.trim(); if (v) { r.name = v; buildPlan(); save(); render(); } });
+    else if (act==="clearReady") { S.target = null; save(); render(); }
+    else if (act==="cook") { buildPlan(); S.view = "cook"; save(); render(); window.scrollTo(0,0); }
+    else if (act==="setup") { S.view = "setup"; save(); render(); window.scrollTo(0,0); }
+    else if (act==="start") { S.startAt = Date.now(); save(); go(S.idx); }
+    else if (act==="now") {
+      const a = anchor(); if (!a) return;
+      const el = (Date.now() - a)/60000; let pick = 0;
+      PLAN.blocks.forEach((b,i)=>{ if (el >= b.off) pick = i; });
+      go(pick);
+    }
+    else if (act==="ready") ask(`<label for="rt" style="display:block;margin-bottom:8px;color:var(--muted)">Everything ready at</label><input class="field" type="time" id="rt" step="300" style="color-scheme:dark;font-size:20px" value="${S.target ? hhmm(S.target) : ""}">`, "Set", ()=>{ setReady(document.getElementById("rt").value); });
+    else if (act==="reset") ask("Clear every checkbox and stop the clock? Your recipes and ready time stay.", "Reset", ()=>{ S.done = {}; S.startAt = null; S.idx = 0; save(); render(); });
+    return;
+  }
+  const tab = e.target.closest(".tl"); if (tab) go(+tab.dataset.i);
+});
+function setReady(v){
+  if (!v) return;
+  const [h,m] = v.split(":").map(Number);
+  const t = new Date(); t.setHours(h,m,0,0);
+  if (t.getTime() <= (S.startAt || Date.now())) t.setDate(t.getDate()+1);
+  S.target = t.getTime(); save(); render();
+}
+document.addEventListener("change", e=>{
+  const el = e.target;
+  if (el.matches("input[data-id]")) {
+    if (el.checked) S.done[el.dataset.id] = true; else delete S.done[el.dataset.id];
+    save(); const y = window.scrollY; render(); window.scrollTo(0,y); return;
+  }
+  if (el.id === "readyIn") { if (el.value) setReady(el.value); return; }
+  if (el.dataset.step) {
+    const [rid, si] = el.dataset.step.split(":"); const r = S.recipes.find(x=>x.id===rid); if (!r) return;
+    const auto = r.steps[si].sents.reduce((a,s)=>a+s.m,0);
+    if (el.value==="" || +el.value===auto) delete r.over[si]; else r.over[si] = Math.max(0, Math.round(+el.value));
+    buildPlan(); save(); const y = window.scrollY; render(); window.scrollTo(0,y); return;
+  }
+  if (el.dataset.prep) {
+    const r = S.recipes.find(x=>x.id===el.dataset.prep); if (!r) return;
+    r.prepOver = el.value==="" ? null : Math.max(0, Math.round(+el.value));
+    buildPlan(); save(); const y = window.scrollY; render(); window.scrollTo(0,y);
+  }
+});
+document.getElementById("prev").onclick = ()=>go(S.idx-1);
+document.getElementById("next").onclick = ()=>go(S.idx+1);
+
+buildPlan();
+render();
+</script>
+</body>
+</html>
