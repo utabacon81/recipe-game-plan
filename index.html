@@ -631,6 +631,7 @@ function renderSetup(){
     h += `<button class="linkbtn" type="button" data-act="sample">Try it with a sample recipe</button>`;
   }
   h += shareHtml();
+  h += mealBackupHtml();
   h += boxHtml();
   main.innerHTML = h;
 }
@@ -676,6 +677,60 @@ function boxHtml(){
   return h;
 }
 let backupMsg = "";
+
+/* ---------- whole-meal backup ----------
+   Saves the meal's recipes (with batch sizes, time fixes and per-recipe ready-bys), the eat time,
+   active hours and approvals. Checkboxes and the clock are left out so a restored plan starts fresh. */
+let mealMsg = "", mealErr = false, mealRestoreOpen = false;
+function mealBackup(){
+  return { app:"recipe-game-plan", kind:"meal", v:1, exported: Date.now(),
+    meal: { recipes: S.recipes, target: S.target, quiet: S.quiet, approved: S.approved } };
+}
+function mealFileName(){
+  const t = S.target || PLAN.endMs || Date.now(), d = new Date(t), z = n=>String(n).padStart(2,"0");
+  const slug = (S.recipes[0] ? S.recipes[0].name : "meal").toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"").slice(0,30);
+  return "game-plan-" + d.getFullYear() + "-" + z(d.getMonth()+1) + "-" + z(d.getDate()) + "-" + slug + ".json";
+}
+function mealBackupHtml(){
+  let h = `<h2>Back up this meal</h2><div class="card">`;
+  if (S.recipes.length) h += `<div class="hint" style="margin-top:0">Saves every recipe in this meal with its batch size, time fixes and ready-by, plus the eat time and active hours. Checkboxes aren't included, so a restored plan starts fresh.</div>
+    <div class="row" style="margin-top:10px"><button class="btn go" type="button" data-act="mealDownload" style="flex:1">Download file</button><button class="btn" type="button" data-act="mealCopy" style="flex:1">Copy</button></div>`;
+  h += `<button class="linkbtn" type="button" data-act="mealRestoreToggle">${mealRestoreOpen ? "Hide restore" : "Restore a meal from a backup"}</button>`;
+  if (mealRestoreOpen) h += `<div class="hint" style="margin-top:0">Pick a backup file or paste a copied backup. It replaces the meal on this phone${S.share ? " and in the shared plan" : ""}. Your recipe box keeps everything and gains any recipes it didn't have.</div>
+    <label class="btn" style="display:flex;align-items:center;justify-content:center;margin-top:10px;cursor:pointer">Choose backup file<input type="file" id="mealFile" accept=".json,application/json,text/plain" hidden></label>
+    <textarea class="field" id="mealPaste" style="min-height:100px;margin-top:10px" placeholder="Or paste a meal backup here"></textarea>
+    <button class="btn go" type="button" data-act="mealRestore" style="width:100%;margin-top:10px">Restore pasted backup</button>`;
+  if (mealMsg) h += `<div class="msg ${mealErr ? "err" : "ok"}">${esc(mealMsg)}</div>`;
+  return h + `</div>`;
+}
+function setMealMsg(m, err){ mealMsg = m; mealErr = !!err; const y = window.scrollY; render(); window.scrollTo(0,y); }
+function restoreMeal(text){
+  let data = null;
+  try { data = JSON.parse(text); } catch(e) {}
+  const m = data && data.meal;
+  if (!m || !Array.isArray(m.recipes) || !m.recipes.every(r=>r && r.id && Array.isArray(r.ings) && Array.isArray(r.steps))) {
+    return setMealMsg(data && Array.isArray(data.library) ? "That's a recipe box backup. Restore it in the recipe box section below." : "That doesn't look like a meal backup.", true);
+  }
+  const go = ()=>{
+    S.recipes = JSON.parse(JSON.stringify(m.recipes));
+    const used = new Set();
+    S.recipes.forEach(r=>{
+      if (!r.k) r.k = 1; if (!r.over) r.over = {};
+      if (!r.color || used.has(r.color)) r.color = COLORS.find(c=>!used.has(c)) || COLORS[used.size % COLORS.length];
+      used.add(r.color);
+      if (!S.library.some(x=>x.id===r.id)) S.library.push(libCopy(r));
+    });
+    S.target = m.target || null;
+    if (m.quiet) S.quiet = m.quiet;
+    S.approved = m.approved || {};
+    S.open = {}; S.rbOpen = null;
+    afterChange();
+    mealRestoreOpen = false;
+    const past = PLAN.startMs && PLAN.startMs < Date.now();
+    setMealMsg(`Restored ${S.recipes.length} recipe${S.recipes.length===1?"":"s"}.` + (past ? " This plan's dates are in the past. Set a new eat time above and you can move every ready-by with it." : ""), false);
+  };
+  if (S.recipes.length) ask(`Replace the ${S.recipes.length} recipe${S.recipes.length===1?"":"s"} in this meal with the backup?`, "Replace", go); else go();
+}
 
 /* ---------- shopping list ---------- */
 function listText(){
@@ -994,11 +1049,21 @@ document.addEventListener("click", e=>{
     else if (act==="leaveShare") ask("Stop syncing this plan on this phone? It stays here as your own copy, and the other people keep theirs.", "Stop sharing", ()=>{ S.share = null; clearInterval(pollTimer); shareMsg = ""; save(); render(); });
     else if (act==="addLib") { const L = S.library.find(x=>x.id===id); if (L && addToMeal(L, 1)) { afterChange(); importMsg = `Added ${L.name} from your recipe box.`; importErr = false; render(); } }
     else if (act==="delLib") { const L = S.library.find(x=>x.id===id); if (L) ask(`Delete <b>${esc(L.name)}</b> from your recipe box?${S.recipes.some(x=>x.id===id) ? " It stays in this meal until you remove it." : ""}`, "Delete", ()=>{ S.library = S.library.filter(x=>x.id!==id); save(); render(); }); }
+    else if (act==="mealDownload") {
+      const blob = new Blob([JSON.stringify(mealBackup(), null, 1)], { type:"application/json" });
+      const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = mealFileName();
+      document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(a.href), 5000);
+      setMealMsg("Saved " + a.download + " to your downloads.");
+    }
+    else if (act==="mealCopy") { const txt = JSON.stringify(mealBackup()); (navigator.clipboard ? navigator.clipboard.writeText(txt) : Promise.reject()).then(()=>setMealMsg("Copied. Paste it into a note or an email to yourself."), ()=>setMealMsg("Couldn't copy here. Use Download file instead.", true)); }
+    else if (act==="mealRestoreToggle") { mealRestoreOpen = !mealRestoreOpen; mealMsg = ""; render(); }
+    else if (act==="mealRestore") { const box = document.getElementById("mealPaste"); restoreMeal(box ? box.value : ""); }
     else if (act==="toggleBackup") { backupOpen = !backupOpen; backupMsg = ""; render(); }
     else if (act==="copyBackup") { const txt = JSON.stringify({ app:"recipe-game-plan", v:1, library:S.library }); const box = document.getElementById("backup"); (navigator.clipboard ? navigator.clipboard.writeText(txt) : Promise.reject()).then(()=>{ backupMsg = `Copied ${S.library.length} recipes.`; render(); }, ()=>{ if (box) { box.value = txt; box.select(); } backupMsg = "Couldn't copy automatically. The backup is in the box, so select and copy it."; }); }
     else if (act==="restore") {
       const box = document.getElementById("backup"); let data = null;
       try { data = JSON.parse(box.value); } catch(e) {}
+      if (data && data.kind === "meal") { restoreMeal(box.value); return; }
       if (!data || !Array.isArray(data.library)) { backupMsg = "That doesn't look like a recipe box backup."; render(); return; }
       let n = 0; data.library.forEach(x=>{ if (x && x.id && Array.isArray(x.ings) && Array.isArray(x.steps) && !S.library.some(y=>y.id===x.id)) { S.library.push(x); n++; } });
       backupMsg = `Restored ${n} recipe${n===1?"":"s"}.`; save(); render();
@@ -1029,7 +1094,13 @@ function setReady(v){
   if (v.includes("T")) t = new Date(v);
   else { const [h,m] = v.split(":").map(Number); t = new Date(); t.setHours(h,m,0,0); if (t.getTime() <= (S.startAt || Date.now())) t.setDate(t.getDate()+1); }
   if (isNaN(t)) return;
+  const old = S.target, delta = old ? t.getTime() - old : 0;
   S.target = t.getTime(); S.approved = {}; buildPlan(); save(); render();
+  const own = S.recipes.filter(r=>r.readyBy);
+  if (delta && own.length) {
+    const days = Math.round(delta/86400000), amt = Math.abs(days) >= 1 && Math.abs(delta - days*86400000) < 60000 ? Math.abs(days) + " day" + (Math.abs(days)===1?"":"s") : fmtDur(Math.abs(delta)/60000);
+    ask(`Also move ${own.length===1 ? "the recipe with its own ready-by" : "the " + own.length + " recipes with their own ready-by"} ${delta > 0 ? "later" : "earlier"} by ${amt}?`, "Move them", ()=>{ own.forEach(r=>r.readyBy += delta); buildPlan(); save(); render(); });
+  }
 }
 document.addEventListener("change", e=>{
   const el = e.target;
@@ -1043,6 +1114,7 @@ document.addEventListener("change", e=>{
     sendCheck("have:" + el.dataset.have, el.checked);
     save(); const y = window.scrollY; render(); window.scrollTo(0,y); return;
   }
+  if (el.id === "mealFile") { const f = el.files && el.files[0]; if (f) f.text().then(restoreMeal, ()=>setMealMsg("Couldn't read that file.", true)); return; }
   if (el.id === "readyIn") { if (el.value) setReady(el.value); return; }
   if (el.dataset.rb) {
     const r = S.recipes.find(x=>x.id===el.dataset.rb); if (!r) return;
