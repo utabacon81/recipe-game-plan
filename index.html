@@ -1070,9 +1070,27 @@ async function testAlert(){
     const sub = await currentSub();
     const res = await fetch("/api/push", { method:"POST", headers:{"content-type":"application/json"}, body: JSON.stringify({ device:S.alerts.device, sub, test:true }) });
     if (!res.ok) throw new Error((await res.json()).error);
-    alertErr = false; alertMsg = "Test queued. It should arrive within a minute, even if you close the app.";
+    alertErr = false; alertMsg = "Test queued. Waiting for the next tick, up to a minute. You can switch apps.";
+    render(); watchTest(Date.now());
+    return;
   } catch(e) { alertErr = true; alertMsg = e.message || "Couldn't send a test."; }
   render();
+}
+/* Report what the push service said about the test, so a missing notification can be traced. */
+async function watchTest(since){
+  for (let i = 0; i < 24; i++) {
+    await new Promise(r=>setTimeout(r, 5000));
+    let j = null;
+    try { j = await (await fetch("/api/push?status=1&device=" + S.alerts.device, { cache:"no-store" })).json(); } catch(e) { continue; }
+    if (!j || !j.found) { alertErr = true; alertMsg = "This phone isn't registered for alerts anymore. Tap Turn off, then Turn on alerts again."; render(); return; }
+    if (j.lastAt && j.lastAt >= since - 1000) {
+      if (j.lastStatus >= 200 && j.lastStatus < 300) { alertErr = false; alertMsg = `Sent at ${fmt(j.lastAt)} and accepted by the push service (${j.host}). If no notification appeared, Android may be blocking Chrome's notifications: Settings, Apps, Chrome, Notifications.`; }
+      else { alertErr = true; alertMsg = `The push service (${j.host}) refused it: ${j.lastStatus || "no response"} ${j.lastBody || ""}`.trim(); }
+      const y = window.scrollY; render(); window.scrollTo(0,y); return;
+    }
+  }
+  alertErr = true; alertMsg = "No tick picked up the test in two minutes. Check that the rgp-ticker Worker's cron trigger is saved and set to every minute.";
+  const y = window.scrollY; render(); window.scrollTo(0,y);
 }
 function alertsHtml(){
   if (!S.recipes.length) return "";

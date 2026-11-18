@@ -18,6 +18,10 @@ async function init(db){
     db.prepare("CREATE INDEX IF NOT EXISTS alerts_due ON alerts (sent, at)"),
     db.prepare("CREATE INDEX IF NOT EXISTS alerts_dev ON alerts (device, sent)")
   ]);
+  /* Delivery diagnostics, added after launch: ignore "duplicate column" errors. */
+  for (const col of ["last_status INTEGER", "last_body TEXT", "last_at INTEGER"]) {
+    try { await db.prepare("ALTER TABLE devices ADD COLUMN " + col).run(); } catch (e) {}
+  }
   ready = true;
 }
 const json = (o, status = 200) => new Response(JSON.stringify(o), { status, headers: { "content-type": "application/json", "cache-control": "no-store" } });
@@ -62,12 +66,13 @@ async function tick(db, origin){
     await db.prepare("UPDATE alerts SET sent = ? WHERE device = ? AND sent = 0 AND at <= ?").bind(now, device, now + 30000).run();
     const d = await db.prepare("SELECT endpoint FROM devices WHERE id = ?").bind(device).first();
     if (!d) continue;
+    let status = 0, text = "";
     try {
-      const res = await fetch(d.endpoint, { method: "POST", body: new Uint8Array(0), headers: { "Authorization": await authHeader(d.endpoint, v, origin), "TTL": "1800", "Urgency": "high" } });
-      if (res.status === 404 || res.status === 410) {
-        await db.batch([db.prepare("DELETE FROM devices WHERE id = ?").bind(device), db.prepare("DELETE FROM alerts WHERE device = ?").bind(device)]);
-      } else if (res.ok) sent++;
-    } catch (e) {}
+      const res = await fetch(d.endpoint, { method: "POST", body: new Uint8Array(0), headers: { "Authorization": await authHeader(d.endpoint, v, origin), "TTL": "1800", "Urgency": "high", "Content-Type": "application/octet-stream" } });
+      status = res.status; text = (await res.text()).slice(0, 300);
+      if (res.ok) sent++;
+    } catch (e) { text = String(e && e.message || e).slice(0, 300); }
+    await db.prepare("UPDATE devices SET last_status = ?, last_body = ?, last_at = ? WHERE id = ?").bind(status, text, Date.now(), device).run();
   }
   return sent;
 }
@@ -83,6 +88,14 @@ export async function onRequest({ request, env }){
     if (q.get("tick")) return json({ sent: await tick(db, url.origin) });
 
     if (m === "GET" && q.get("key")) return json({ publicKey: (await vapid(db)).pub });
+
+    if (m === "GET" && q.get("status")) {
+      const id = q.get("device") || "";
+      const d = await db.prepare("SELECT endpoint, last_status, last_body, last_at FROM devices WHERE id = ?").bind(id).first();
+      if (!d) return json({ found: false });
+      const p = await db.prepare("SELECT COUNT(*) AS n FROM alerts WHERE device = ? AND sent = 0").bind(id).first();
+      return json({ found: true, host: new URL(d.endpoint).host, lastStatus: d.last_status, lastBody: d.last_body, lastAt: d.last_at, pending: p ? p.n : 0 });
+    }
 
     if (m === "GET" && q.get("inbox")) {
       const endpoint = q.get("endpoint") || "";
