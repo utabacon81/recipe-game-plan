@@ -125,6 +125,8 @@
   .qtimes{align-items:center;margin-top:8px}
   .qtimes input{flex:1;min-height:48px;border-radius:12px;border:1px solid var(--line);background:var(--bg);color:var(--text);font:600 17px Inter,sans-serif;padding:0 12px;color-scheme:dark}
   .qtimes span{color:var(--muted)}
+  .qbrow{border:1px solid var(--line);border-radius:12px;padding:10px;margin-top:10px}
+  .sel{flex:1;min-height:44px;border-radius:12px;border:1px solid var(--line);background:var(--bg);color:var(--text);font:500 15px Inter,sans-serif;padding:0 10px;width:100%;color-scheme:dark}
   .cf{padding:10px 0;border-top:1px solid var(--line);font-size:15px;line-height:1.45}
   .cf:first-child{border-top:none;padding-top:0}
   .tlday{flex:0 0 auto;align-self:center;font:600 12px Oswald,sans-serif;letter-spacing:1.5px;text-transform:uppercase;color:var(--done);padding:0 4px 0 10px;border-left:2px solid var(--line);margin-left:4px;white-space:nowrap}
@@ -272,11 +274,24 @@ function stepMin(r, i){ const o = r.over[i]; return (o!=null && o!=="") ? +o : a
 const WAITV = /\b(simmer|bake|roast|rest|soak|chill|refrigerat|marinat|brais|steep|rise|rising|proof|thaw|cool|smoke|sous vide|reduce|boil|poach|cure|curing|brine|freez|stand|slow cook|pressure cook|reheat|warm|dry|bath|oven|let (it|them) (sit|set))\w*/i;
 const FLEX = /\b(brin(?:e|ed|es|ing)|marinat\w*|soak\w*|refrigerat\w*|chill\w*|overnight|cure[ds]?|curing|dry[- ]brin\w*|cold[- ]ferment\w*)\b/i;
 function hm(s){ const [h,m] = String(s||"0:00").split(":").map(Number); return (h||0)*60 + (m||0); }
-function quietAt(ms){
-  const q = S.quiet; if (!q || !q.on) return false;
-  const d = new Date(ms), t = d.getHours()*60 + d.getMinutes(), a = hm(q.from), b = hm(q.to);
+/* Weekly quiet times: S.quiet.blocks = [{ days:"all"|"wkd"|"wke"|"0".."6", from, to, short }].
+   short = longest hands-on task (minutes) that's still fine inside the block, like a lunch-break job. 0 = none. */
+const QDAYS = [["all","Every day"],["wkd","Weekdays"],["wke","Weekends"],["0","Sunday"],["1","Monday"],["2","Tuesday"],["3","Wednesday"],["4","Thursday"],["5","Friday"],["6","Saturday"]];
+function dayHit(key, dow){ return key === "all" || (key === "wkd" && dow >= 1 && dow <= 5) || (key === "wke" && (dow === 0 || dow === 6)) || key === String(dow); }
+function inBlock(bk, ms){
+  const d = new Date(ms), t = d.getHours()*60 + d.getMinutes(), a = hm(bk.from), b = hm(bk.to), dow = d.getDay();
   if (a === b) return false;
-  return a < b ? (t >= a && t < b) : (t >= a || t < b);
+  if (a < b) return dayHit(bk.days, dow) && t >= a && t < b;
+  /* Runs past midnight: belongs to the day it starts. */
+  return (dayHit(bk.days, dow) && t >= a) || (dayHit(bk.days, (dow + 6) % 7) && t < b);
+}
+function quietAt(ms, len){
+  const q = S.quiet; if (!q) return false;
+  if (q.on) {
+    const d = new Date(ms), t = d.getHours()*60 + d.getMinutes(), a = hm(q.from), b = hm(q.to);
+    if (a !== b && (a < b ? (t >= a && t < b) : (t >= a || t < b))) return true;
+  }
+  return (q.blocks || []).some(bk=>inBlock(bk, ms) && !(bk.short && (len || 0) <= bk.short));
 }
 /* How long a flexible wait may run: up to 2x, or up to a day for anything marked overnight. */
 function flexCap(text, dur){ return /overnight/i.test(text) ? Math.max(dur*2, 1440) : dur*2; }
@@ -284,10 +299,10 @@ function dayKey(ms){ const d = new Date(ms); return d.getFullYear()+"-"+(d.getMo
 /* Times are minutes relative to the eat time (0). */
 function makeCtx(T){
   const ctx = { T, conflicts:[], notes:[] };
-  ctx.Q = x => !!T && quietAt(T + x*60000);
+  ctx.Q = (x, len) => !!T && quietAt(T + x*60000, len);
   /* Only hands-on time has to fall inside active hours. Soaks, simmers and other waits can run any time. */
   /* hands: true for the whole span, a number for that many hands-on minutes from the start, or 0 for none. */
-  ctx.ok = (b, e, hands)=>{ if (!hands) return true; const end = hands === true ? Math.max(e, b+1) : b + Math.max(1, hands); for (let x = b; x < end; x += 5) if (ctx.Q(x)) return false; return true; };
+  ctx.ok = (b, e, hands)=>{ if (!hands) return true; const end = hands === true ? Math.max(e, b+1) : b + Math.max(1, hands); for (let x = b; x < end; x += 5) if (ctx.Q(x, end - b)) return false; return true; };
   ctx.search = (from, limit, test)=>{ for (let x = Math.floor(from/5)*5; x >= limit; x -= 5) if (test(x)) return x; return null; };
   return ctx;
 }
@@ -359,12 +374,12 @@ function recipeSchedule(r, ctx){
       let fixed = false;
       if (s.flex) {
         const nb = ctx.search(b-5, e - flexCap(s.text, s.dur), x=>ctx.ok(x, e, false));
-        if (nb != null) { s.note = "Stretched from " + fmtDur(s.dur) + " to " + fmtDur(e-nb) + " to keep hands-on work in active hours."; ctx.notes.push({ x:nb, name:r.name, text:short(s.text) + " " + s.note.charAt(0).toLowerCase() + s.note.slice(1) }); b = nb; fixed = true; }
+        if (nb != null) { s.note = "Stretched from " + fmtDur(s.dur) + " to " + fmtDur(e-nb) + " to keep hands-on work in your available hours."; ctx.notes.push({ x:nb, name:r.name, text:short(s.text) + " " + s.note.charAt(0).toLowerCase() + s.note.slice(1) }); b = nb; fixed = true; }
       }
       if (!fixed && nx && nx.flex) {
         const ne = ctx.search(e-5, nx.e - flexCap(nx.text, nx.dur), x=>ctx.ok(x - s.dur, x, s.hands) && !ctx.Q(x));
         if (ne != null) {
-          nx.b = ne; nx.note = "Stretched to " + fmtDur(nx.e - ne) + " so the step before it stays in active hours.";
+          nx.b = ne; nx.note = "Stretched to " + fmtDur(nx.e - ne) + " so the step before it stays in your available hours.";
           ctx.notes.push({ x:ne, name:r.name, text:short(nx.text) + " " + nx.note.charAt(0).toLowerCase() + nx.note.slice(1) });
           e = ne; b = e - s.dur; fixed = true;
         }
@@ -374,7 +389,7 @@ function recipeSchedule(r, ctx){
     /* A flexible wait (soak, thaw overnight, brine) that would start outside active hours starts the evening before instead. Never flagged. */
     if (!s.hands && s.flex && ctx.Q(b)) {
       const nb = ctx.search(b-5, e - flexCap(s.text, s.dur), x=>!ctx.Q(x));
-      if (nb != null) { s.note = "Starts early so it begins in active hours. Runs " + fmtDur(e-nb) + "."; ctx.notes.push({ name:r.name, text:short(s.text).replace(/[.!]$/,"") + " now runs " + fmtDur(e-nb) + " so it starts in active hours." }); b = nb; }
+      if (nb != null) { s.note = "Starts early so it begins in your available hours. Runs " + fmtDur(e-nb) + "."; ctx.notes.push({ name:r.name, text:short(s.text).replace(/[.!]$/,"") + " now runs " + fmtDur(e-nb) + " so it starts in your available hours." }); b = nb; }
     }
     s.b = b; s.e = e; cursor = b;
   }
@@ -409,7 +424,7 @@ function recipeSchedule(r, ctx){
     const key = r.id + ":a:" + p.i;
     if (ctx.Q(b)) {
       const nb = ctx.search(b-5, e - flexCap(p.prep, dur), x=>!ctx.Q(x));
-      if (nb != null) { note = " Starts earlier so it begins in active hours."; b = nb; }
+      if (nb != null) { note = " Starts earlier so it begins in your available hours."; b = nb; }
     }
     blocks.push({ x:b, dur:0, kind:"advance", ings:[{ raw:scaleLine(p.raw, k), prepped:false, again:false }], key,
       tasks:[[r.id+":a:"+p.i, "Start ahead. " + cap(p.name) + ": " + p.prep, "Needs about " + fmtDur(dur) + " before it's used." + note]] });
@@ -463,7 +478,7 @@ function buildPlan(){
     const names = list.map(x=>x.r.name).join(" + ");
     if (!ctx.ok(b, e, true) && !S.approved[key]) {
       const nb = ctx.search(b-5, b - 1440, x=>ctx.ok(x, x + sum, true));
-      if (nb != null) { notes.push({ name:names, text:"Prep moved earlier to keep it in active hours." }); b = nb; }
+      if (nb != null) { notes.push({ name:names, text:"Prep moved earlier to keep it in your available hours." }); b = nb; }
       else { const c = { key, x:b, ms: R ? R + b*60000 : null, name:names, text:"Prep work" }; conflicts.push(c); list.forEach(x=>{ (info[x.r.id].extra = info[x.r.id].extra || []).push(c); }); }
     }
     list.forEach(({r,p})=>{ all.push({ x:b + d, dur:sum, kind:"prep", r, ings:p.prepIngs, tasks:p.prepTasks, key }); info[r.id].start = Math.min(info[r.id].start, b + d); });
@@ -613,15 +628,16 @@ function renderSetup(){
       ${S.target ? `<button class="btn" type="button" data-act="clearReady">Clear</button>` : ""}</div>
       <div class="hint">${PLAN.startMs ? `Plan starts <b style="color:var(--accent)">${whenX(PLAN.startMs)}</b>${S.target ? ` to eat ${whenX(S.target)}` : ""}. Total plan: ${fmtDur(PLAN.total)}.` : `Optional. Set it and every step gets a day and clock time. Total plan: ${fmtDur(PLAN.total)}.`}</div>
       <label class="qrow"><input type="checkbox" id="qOn" ${S.quiet.on?"checked":""}> Active hours</label>
-      ${S.quiet.on ? `<div class="row qtimes"><input type="time" id="qTo" step="900" value="${S.quiet.to}" aria-label="Active hours start"><span>to</span><input type="time" id="qFrom" step="900" value="${S.quiet.from}" aria-label="Active hours end"></div>
-      <div class="hint">Hands-on steps outside this window get flagged. Soaks, simmers, thaws and other waits can run any time.${PLAN.startMs ? "" : " Applies once you set a ready-by."}</div>` : ""}
+      ${S.quiet.on ? `<div class="row qtimes"><input type="time" id="qTo" step="900" value="${S.quiet.to}" aria-label="Active hours start"><span>to</span><input type="time" id="qFrom" step="900" value="${S.quiet.from}" aria-label="Active hours end"></div>` : ""}
+      ${quietBlocksHtml()}
+      <div class="hint">Hands-on steps outside active hours or inside a quiet time get flagged. Soaks, simmers, thaws and other waits can run any time.${PLAN.startMs ? "" : " Applies once you set a ready-by."}</div>
       ${PLAN.notes.length ? `<div class="hint" style="color:var(--done)">${PLAN.notes.map(n=>esc(n.name + ": " + n.text)).join("<br>")}</div>` : ""}
     </div>`;
     PLAN.conflicts.sort((a,b)=>(a.ms||0)-(b.ms||0));
     if (PLAN.conflicts.length) {
       h += `<h2 style="color:var(--warn)">Needs your OK</h2><div class="card">`;
       PLAN.conflicts.forEach(c=>{ h += `<div class="cf"><div><b>${esc(whenX(c.ms))}</b> · ${esc(c.name)}<br>${esc(short(c.text, 120))}</div>
-        <div class="hint" style="margin-top:4px">This hands-on step falls outside active hours. Move this recipe's ready-by, or approve it.</div>
+        <div class="hint" style="margin-top:4px">This hands-on step falls outside your available hours. Move this recipe's ready-by, or approve it.</div>
         <button class="btn sm" type="button" data-act="approve" data-key="${esc(c.key)}" style="margin-top:8px">Approve</button></div>`; });
       h += `</div>`;
     }
@@ -636,6 +652,23 @@ function renderSetup(){
   main.innerHTML = h;
 }
 
+/* ---------- weekly quiet times ---------- */
+function quietBlocksHtml(){
+  const bl = S.quiet.blocks || [];
+  let h = `<div class="qb"><div class="qrow" style="margin-top:16px">Quiet times</div>`;
+  bl.forEach((bk,i)=>{
+    h += `<div class="qbrow">
+      <div class="row"><select class="sel" data-qb="${i}" data-f="days" aria-label="Days">${QDAYS.map(([k,l])=>`<option value="${k}" ${bk.days===k?"selected":""}>${l}</option>`).join("")}</select>
+        <button class="btn sm del" type="button" data-act="qbDel" data-i="${i}" aria-label="Remove this quiet time">✕</button></div>
+      <div class="row qtimes"><input type="time" step="900" data-qb="${i}" data-f="from" value="${bk.from}" aria-label="From"><span>to</span><input type="time" step="900" data-qb="${i}" data-f="to" value="${bk.to}" aria-label="To"></div>
+      <select class="sel" data-qb="${i}" data-f="short" aria-label="Short tasks" style="margin-top:8px">${[[0,"No hands-on work"],[15,"Tasks up to 15 min are OK"],[30,"Tasks up to 30 min are OK"],[60,"Tasks up to 1 hr are OK"]].map(([v,l])=>`<option value="${v}" ${(+bk.short||0)===v?"selected":""}>${l}</option>`).join("")}</select>
+    </div>`;
+  });
+  h += `<button class="btn sm" type="button" data-act="qbAdd" style="margin-top:10px">Add a quiet time</button>`;
+  if (!bl.length) h += `<div class="hint">Block off regular commitments, like work hours on weekdays or Saturday mornings.</div>`;
+  return h + `</div>`;
+}
+
 /* ---------- per-recipe ready-by ---------- */
 function rbHtml(r){
   const I = PLAN.info[r.id] || {};
@@ -645,7 +678,7 @@ function rbHtml(r){
   else h += `<button class="btn sm" type="button" data-act="rbPick" data-id="${r.id}">Same as meal</button>`;
   if (I.startMs) h += `<div class="when2">${r.readyBy ? "Ready " + whenX(I.endMs) + " · " : ""}Starts ${whenX(I.startMs)}</div>`;
   const cf = (I.conflicts || []).filter(c=>!S.approved[c.key]);
-  if (cf.length) { const first = Math.min(...cf.map(c=>c.ms)); h += `<div class="warnline">${cf.length === 1 ? "1 hands-on step falls outside active hours, at " : cf.length + " hands-on steps fall outside active hours, starting "}${esc(whenX(first))}. Move the ready-by or approve them below.</div>`; }
+  if (cf.length) { const first = Math.min(...cf.map(c=>c.ms)); h += `<div class="warnline">${cf.length === 1 ? "1 hands-on step falls outside your available hours, at " : cf.length + " hands-on steps fall outside your available hours, starting "}${esc(whenX(first))}. Move the ready-by or approve them below.</div>`; }
   return h + `</div>`;
 }
 
@@ -795,7 +828,7 @@ function renderCook(){
   let h = dayHead + `<div class="when"><div class="time">${big}</div><div class="count">Step ${S.idx+1} of ${blocks.length} · ${n}/${all.length} done${a ? " · "+rel(B.off)+" from start" : ""}${PLAN.multiDay ? "" : dayNote}${B.dur ? " · about "+fmtDur(B.dur) : ""}</div></div>
     <div class="headline">${esc(B.headline)}</div>
     ${statusHtml(S.idx)}
-    ${B.conflicts.filter(c=>!S.approved[c.key]).map(c=>`<div class="status late"><b>Outside active hours.</b> This hands-on step lands at ${esc(whenX(c.ms))}. Move this recipe's ready-by, or approve it. <button class="btn sm" type="button" data-act="approve" data-key="${esc(c.key)}" style="margin-top:8px">Approve</button></div>`).join("")}
+    ${B.conflicts.filter(c=>!S.approved[c.key]).map(c=>`<div class="status late"><b>Outside your available hours.</b> This hands-on step lands at ${esc(whenX(c.ms))}. Move this recipe's ready-by, or approve it. <button class="btn sm" type="button" data-act="approve" data-key="${esc(c.key)}" style="margin-top:8px">Approve</button></div>`).join("")}
     <div class="progress"><div style="width:${all.length ? n/all.length*100 : 0}%"></div></div>`;
   B.groups.forEach(g=>{
     h += `<section class="group"><div class="tag" style="color:${g.color}"><i style="background:${g.color}"></i>${esc(g.label)}</div>`;
@@ -1043,6 +1076,8 @@ document.addEventListener("click", e=>{
     else if (act==="copyList") { const txt = listText(); (navigator.clipboard ? navigator.clipboard.writeText(txt) : Promise.reject()).then(()=>{ copyMsg = "Copied. Paste it into a note or a text."; render(); }, ()=>{ copyMsg = "Couldn't copy here. Long-press to select the list instead."; render(); }); }
     else if (act==="clearHave") { Object.keys(S.have).forEach(k=>sendCheck("have:"+k, false)); S.have = {}; save(); render(); }
     else if (act==="share") startShare();
+    else if (act==="qbAdd") { S.quiet.blocks = S.quiet.blocks || []; S.quiet.blocks.push({ days:"wkd", from:"10:00", to:"16:00", short:0 }); buildPlan(); save(); const y = window.scrollY; render(); window.scrollTo(0,y); }
+    else if (act==="qbDel") { (S.quiet.blocks || []).splice(+t.dataset.i, 1); buildPlan(); save(); const y = window.scrollY; render(); window.scrollTo(0,y); }
     else if (act==="rbPick" && r) { S.rbOpen = r.id; render(); const f = main.querySelector(`[data-rb="${r.id}"]`); if (f) { f.focus(); if (f.showPicker) try { f.showPicker(); } catch(e) {} } }
     else if (act==="rbSame" && r) { delete r.readyBy; S.rbOpen = null; buildPlan(); save(); const y = window.scrollY; render(); window.scrollTo(0,y); }
     else if (act==="sendLink") sendLink();
@@ -1113,6 +1148,12 @@ document.addEventListener("change", e=>{
     if (el.checked) S.have[el.dataset.have] = true; else delete S.have[el.dataset.have];
     sendCheck("have:" + el.dataset.have, el.checked);
     save(); const y = window.scrollY; render(); window.scrollTo(0,y); return;
+  }
+  if (el.dataset.qb != null && el.dataset.f) {
+    const bk = (S.quiet.blocks || [])[+el.dataset.qb]; if (!bk) return;
+    const f = el.dataset.f;
+    if (f === "short") bk.short = +el.value; else if (f === "days") bk.days = el.value; else if (el.value) bk[f] = el.value;
+    buildPlan(); save(); const y = window.scrollY; render(); window.scrollTo(0,y); return;
   }
   if (el.id === "mealFile") { const f = el.files && el.files[0]; if (f) f.text().then(restoreMeal, ()=>setMealMsg("Couldn't read that file.", true)); return; }
   if (el.id === "readyIn") { if (el.value) setReady(el.value); return; }
