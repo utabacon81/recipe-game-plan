@@ -99,7 +99,7 @@
   .rv .st .u{font-size:12px;color:var(--muted);text-align:center;margin-top:3px}
   .empty{color:var(--muted);font-size:15px;line-height:1.5;padding:4px 0}
   .readyrow{display:flex;gap:10px;align-items:center}
-  .readyrow input{flex:1;min-height:52px;border-radius:12px;border:1px solid var(--line);background:var(--bg);color:var(--text);font:600 20px Inter,sans-serif;padding:0 14px;color-scheme:dark}
+  .readyrow input{flex:1;min-height:52px;border-radius:12px;border:1px solid var(--line);background:var(--bg);color:var(--text);font:600 17px Inter,sans-serif;padding:0 12px;color-scheme:dark;min-width:0}
   .hint{color:var(--muted);font-size:14px;line-height:1.45;margin-top:8px}
   .batch{display:flex;gap:6px;margin-top:12px;flex-wrap:wrap}
   .batch button{min-width:52px;min-height:40px;border-radius:10px;border:1px solid var(--line);background:none;color:var(--text);font:600 15px Oswald,sans-serif;letter-spacing:.5px;cursor:pointer;padding:0 10px}
@@ -120,6 +120,14 @@
   .irow input:checked::after{content:"";width:10px;height:6px;border-left:3px solid #1E1C1A;border-bottom:3px solid #1E1C1A;transform:translateY(-2px) rotate(-45deg)}
   .irow .nm{flex:1;font-size:16px;line-height:1.35}
   .irow.have .nm{opacity:.45;text-decoration:line-through}
+  .qrow{display:flex;gap:10px;align-items:center;margin-top:16px;font-size:15px}
+  .qrow input{width:22px;height:22px;accent-color:var(--accent)}
+  .qtimes{align-items:center;margin-top:8px}
+  .qtimes input{flex:1;min-height:48px;border-radius:12px;border:1px solid var(--line);background:var(--bg);color:var(--text);font:600 17px Inter,sans-serif;padding:0 12px;color-scheme:dark}
+  .qtimes span{color:var(--muted)}
+  .cf{padding:10px 0;border-top:1px solid var(--line);font-size:15px;line-height:1.45}
+  .cf:first-child{border-top:none;padding-top:0}
+  .dayh{font:600 14px Oswald,sans-serif;letter-spacing:2px;text-transform:uppercase;color:var(--done);margin-bottom:6px}
   .modal{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none;align-items:center;justify-content:center;padding:24px;z-index:10}
   .modal.open{display:flex}
   .box{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:20px;max-width:360px;width:100%}
@@ -164,6 +172,8 @@ let S = { view:"setup", recipes:[], library:[], target:null, startAt:null, idx:0
 try { const s = JSON.parse(localStorage.getItem(KEY)); if (s && Array.isArray(s.recipes)) S = Object.assign(S, s); } catch(e) {}
 if (!Array.isArray(S.library)) S.library = [];
 if (!S.have) S.have = {};
+if (!S.quiet) S.quiet = { on:true, from:"22:00", to:"10:00" };
+if (!S.approved) S.approved = {};
 S.recipes.forEach(r=>{ if (!r.k) r.k = 1; if (!S.library.some(x=>x.id===r.id)) S.library.push(libCopy(r)); });
 const BATCHES = [0.5, 1, 1.5, 2, 3];
 
@@ -249,7 +259,39 @@ function activeFactor(k){ return 1 + 0.5*Math.max(0, k-1); }
 /* ---------- per-recipe timeline ---------- */
 function autoStepMin(r, i){ const k = r.k || 1; return Math.round(r.steps[i].sents.reduce((a,s)=>a + (s.timed ? s.m : s.m*activeFactor(k)), 0)); }
 function stepMin(r, i){ const o = r.over[i]; return (o!=null && o!=="") ? +o : autoStepMin(r, i); }
-function prepItems(r){ return r.ings.map(parseIng).map((p,i)=>({...p, i})).filter(p=>p.prep); }
+/* ---------- quiet hours ----------
+   Hands-on work and the start of any wait stay out of the quiet window when an eat time is set.
+   Flexible waits (brine, marinate, chill, overnight) stretch up to 2x to make that work.
+   A step that still lands in quiet hours needs your OK. */
+const FLEX = /\b(brin(?:e|ed|es|ing)|marinat\w*|soak\w*|refrigerat\w*|chill\w*|overnight|cure[ds]?|curing|dry[- ]brin\w*|cold[- ]ferment\w*)\b/i;
+function hm(s){ const [h,m] = String(s||"0:00").split(":").map(Number); return (h||0)*60 + (m||0); }
+function quietAt(ms){
+  const q = S.quiet; if (!q || !q.on) return false;
+  const d = new Date(ms), t = d.getHours()*60 + d.getMinutes(), a = hm(q.from), b = hm(q.to);
+  if (a === b) return false;
+  return a < b ? (t >= a && t < b) : (t >= a || t < b);
+}
+/* How long a flexible wait may run: up to 2x, or up to a day for anything marked overnight. */
+function flexCap(text, dur){ return /overnight/i.test(text) ? Math.max(dur*2, 1440) : dur*2; }
+function dayKey(ms){ const d = new Date(ms); return d.getFullYear()+"-"+(d.getMonth()+1)+"-"+d.getDate(); }
+/* Times are minutes relative to the eat time (0). */
+function makeCtx(T){
+  const ctx = { T, conflicts:[], notes:[] };
+  /* If you eat inside quiet hours, the run-up to the meal is fair game. */
+  let qCut = Infinity;
+  if (T && quietAt(T)) { let x = 0; while (x > -1440 && quietAt(T + x*60000)) x -= 5; qCut = x + 5; }
+  ctx.Q = x => !!T && x < qCut && quietAt(T + x*60000);
+  ctx.ok = (b, e, hands)=>{ if (ctx.Q(b)) return false; if (hands) for (let x = b; x < e; x += 5) if (ctx.Q(x)) return false; return true; };
+  ctx.search = (from, limit, test)=>{ for (let x = Math.floor(from/5)*5; x >= limit; x -= 5) if (test(x)) return x; return null; };
+  return ctx;
+}
+function short(t, n){ t = String(t); n = n || 60; return t.length > n ? t.slice(0, n-3).replace(/\s+\S*$/,"") + "…" : t; }
+
+/* Advance work hidden in an ingredient line, like "brined overnight" or "marinated 4 hours". */
+function advItems(r){ return r.ings.map(parseIng).map((p,i)=>({...p, i})).filter(p=>p.prep && durMin(p.prep) > 0); }
+function autoAdvMin(p){ return durMin(p.prep); }
+function advMin(r, p){ const o = r.advOver && r.advOver[p.i]; return (o!=null && o!=="") ? +o : autoAdvMin(p); }
+function prepItems(r){ return r.ings.map(parseIng).map((p,i)=>({...p, i})).filter(p=>p.prep && !durMin(p.prep)); }
 function autoPrepMin(r){ const n = prepItems(r).length; return n ? Math.round(Math.max(5, n*3) * (1 + 0.6*Math.max(0, (r.k||1)-1))) : 0; }
 function prepMin(r){ if (r.prepOver!=null && r.prepOver!=="") return +r.prepOver; return autoPrepMin(r); }
 
@@ -280,46 +322,92 @@ function matchIngredients(r){
   return { parsed, hits };
 }
 
-function recipePlan(r){
+/* Schedule one recipe backward from the eat time. */
+function recipeSchedule(r, ctx){
+  const k = r.k || 1;
   const { parsed, hits } = matchIngredients(r);
-  const blocks = [];
-  let off = 0;
-  const pm = prepMin(r);
-  const pitems = prepItems(r);
-  const prep = pitems.length ? { dur:pm,
-      ings: pitems.map(p=>({raw:scaleLine(p.raw, r.k||1), prepped:false})),
-      tasks: pitems.map(p=>[r.id+":p:"+p.i, (/\b(for garnish|for serving|to serve|toppings?)\b/i.test(p.raw) ? "Garnishes" : cap(p.name))+": "+p.prep, ""]).concat([[r.id+":p:gather","Measure out everything else for this recipe",""]]) } : null;
-  const preheats = [];
-  const firstSeen = {};
   const lastReal = r.steps.map((st,si)=>st.sents.some(s=>!s.pre)?si:-1).filter(x=>x>=0).pop();
-  let servedInSteps = false;
+  const steps = [];
   r.steps.forEach((st,si)=>{
     const real = st.sents.filter(s=>!s.pre);
-    st.sents.filter(s=>s.pre).forEach(s=>preheats.push({si, t:s.t}));
     if (!real.length) return;
-    let dur = stepMin(r, si);
+    let dur = stepMin(r, si), serve = false;
+    const text = real.map(s=>s.t).join(" ");
     /* A short closing "serve with..." step lands right at the ready time. */
-    if (si === lastReal && /\bserve\b/i.test(real.map(s=>s.t).join(" ")) && !real.some(s=>s.timed) && r.over[si]==null) { dur = 0; servedInSteps = true; }
+    if (si === lastReal && /\bserve\b/i.test(text) && !real.some(s=>s.timed) && r.over[si]==null) { dur = 0; serve = true; }
+    const timed = real.filter(s=>s.timed).reduce((a,s)=>a+s.m,0), act = real.filter(s=>!s.timed).reduce((a,s)=>a+s.m,0);
+    const wait = timed > 0 && timed >= act;
+    steps.push({ si, dur, serve, real, text, hands: !wait && dur > 0, flex: wait && dur >= 60 && FLEX.test(text), note:"" });
+  });
+  /* Place steps from the last one back. */
+  let cursor = 0;
+  for (let j = steps.length-1; j >= 0; j--) {
+    const s = steps[j], nx = steps[j+1];
+    let e = cursor, b = e - s.dur;
+    const key = r.id + ":" + s.si;
+    if (!ctx.ok(b, e, s.hands) && !S.approved[key]) {
+      let fixed = false;
+      if (s.flex) {
+        const nb = ctx.search(b-5, e - flexCap(s.text, s.dur), x=>ctx.ok(x, e, false));
+        if (nb != null) { s.note = "Stretched from " + fmtDur(s.dur) + " to " + fmtDur(e-nb) + " so it starts before quiet hours."; ctx.notes.push({ x:nb, name:r.name, text:short(s.text) + " " + s.note.charAt(0).toLowerCase() + s.note.slice(1) }); b = nb; fixed = true; }
+      }
+      if (!fixed && nx && nx.flex) {
+        const ne = ctx.search(e-5, nx.e - flexCap(nx.text, nx.dur), x=>ctx.ok(x - s.dur, x, s.hands) && !ctx.Q(x));
+        if (ne != null) {
+          nx.b = ne; nx.note = "Stretched to " + fmtDur(nx.e - ne) + " so the step before it stays out of quiet hours.";
+          ctx.notes.push({ x:ne, name:r.name, text:short(nx.text) + " " + nx.note.charAt(0).toLowerCase() + nx.note.slice(1) });
+          e = ne; b = e - s.dur; fixed = true;
+        }
+      }
+      if (!fixed) ctx.conflicts.push({ key, x:b, name:r.name, text:s.text });
+    }
+    s.b = b; s.e = e; cursor = b;
+  }
+  const blocks = [];
+  const firstSeen = {};
+  let servedInSteps = false;
+  steps.forEach(s=>{
+    if (s.serve) servedInSteps = true;
     const ings = [];
     parsed.forEach((p,ii)=>{
-      if (!hits[ii].includes(si)) return;
-      const again = firstSeen[ii]!==undefined;
-      if (!again) firstSeen[ii] = si;
-      ings.push({ raw: again ? p.name : scaleLine(p.raw, r.k||1), prepped: !again && !!p.prep, again });
+      if (!hits[ii].includes(s.si)) return;
+      const again = firstSeen[ii] !== undefined;
+      if (!again) firstSeen[ii] = s.si;
+      ings.push({ raw: again ? p.name : scaleLine(p.raw, k), prepped: !again && !!p.prep, again });
     });
-    blocks.push({ off, dur, kind:"step", si, ings,
-      tasks: real.map((s,ti)=>[r.id+":"+si+":"+ti, scaleText(s.t, r.k||1), [s.timed ? "About "+fmtDur(s.m) : "", batchNote(s.t, r.k||1)].filter(Boolean).join(" ")]) });
-    off += dur;
+    const tasks = s.real.map((x,ti)=>[r.id+":"+s.si+":"+ti, scaleText(x.t, k), [x.timed ? "About "+fmtDur(x.m) : "", batchNote(x.t, k)].filter(Boolean).join(" ")]);
+    if (s.note && tasks.length) { const t = tasks[tasks.length-1]; t[2] = [t[2], s.note].filter(Boolean).join(" "); }
+    blocks.push({ x:s.b, dur:s.e - s.b, kind:"step", si:s.si, ings, tasks, key:r.id+":"+s.si });
   });
-  const total = off;
-  preheats.forEach((ph,k)=>{
-    const ovenBlock = blocks.find(b=>b.kind==="step" && b.si>ph.si && /\b(bake|roast|oven|broil)\b/i.test(b.tasks.map(t=>t[1]).join(" ")))
-                   || blocks.find(b=>b.kind==="step" && b.si>=ph.si);
-    const at = ovenBlock ? ovenBlock.off - 15 : 0;  /* may be negative: preheat during prep */
-    blocks.push({ off:at, dur:0, kind:"preheat", ings:[], tasks:[[r.id+":h:"+k, ph.t, "Most ovens need about 15 minutes to heat."]] });
+  /* Preheats land 15 minutes before the oven step. */
+  let pk = 0;
+  r.steps.forEach((st,si)=>st.sents.filter(x=>x.pre).forEach(x=>{
+    const oven = steps.find(s=>s.si > si && /\b(bake|roast|oven|broil)\b/i.test(s.text)) || steps.find(s=>s.si >= si);
+    blocks.push({ x:(oven ? oven.b : 0) - 15, dur:0, kind:"preheat", ings:[], tasks:[[r.id+":h:"+(pk++), x.t, "Most ovens need about 15 minutes to heat."]] });
+  }));
+  /* Advance work from ingredient lines runs alongside, finishing before the step that uses it. */
+  advItems(r).forEach(p=>{
+    const dur = advMin(r, p);
+    const users = steps.filter(s=>hits[p.i].includes(s.si));
+    const e = users.length ? Math.min(...users.map(s=>s.b)) : (steps.length ? steps[0].b : 0);
+    let b = e - dur, note = "";
+    const key = r.id + ":a:" + p.i;
+    if (ctx.Q(b) && !S.approved[key]) {
+      const nb = ctx.search(b-5, e - flexCap(p.prep, dur), x=>!ctx.Q(x));
+      if (nb != null) { note = " Stretched to " + fmtDur(e-nb) + " so it starts before quiet hours."; ctx.notes.push({ x:nb, name:r.name, text:cap(p.name) + " stretched to " + fmtDur(e-nb) + "." }); b = nb; }
+      else ctx.conflicts.push({ key, x:b, name:r.name, text:cap(p.name) + ": " + p.prep });
+    }
+    blocks.push({ x:b, dur:0, kind:"advance", ings:[{ raw:scaleLine(p.raw, k), prepped:false, again:false }], key,
+      tasks:[[r.id+":a:"+p.i, "Start ahead. " + cap(p.name) + ": " + p.prep, "Needs about " + fmtDur(dur) + " before it's used." + note]] });
   });
-  if (!servedInSteps) blocks.push({ off:total, dur:0, kind:"serve", ings:[], tasks:[[r.id+":s","Plate and serve",""]] });
-  return { total, prepDur: prep ? pm : 0, prep, blocks };
+  if (!servedInSteps) blocks.push({ x:0, dur:0, kind:"serve", ings:[], tasks:[[r.id+":s","Plate and serve",""]] });
+  const pitems = prepItems(r);
+  const pm = pitems.length ? prepMin(r) : 0;
+  return {
+    blocks, prepDur: pm, firstStart: steps.length ? steps[0].b : 0,
+    prepIngs: pitems.map(p=>({ raw:scaleLine(p.raw, k), prepped:false })),
+    prepTasks: pitems.map(p=>[r.id+":p:"+p.i, (/\b(for garnish|for serving|to serve|toppings?)\b/i.test(p.raw) ? "Garnishes" : cap(p.name))+": "+p.prep, ""]).concat(pm ? [[r.id+":p:gather","Measure out everything else for this recipe",""]] : [])
+  };
 }
 function batchNote(t, k){
   if (k < 2) return "";
@@ -330,34 +418,50 @@ function batchNote(t, k){
 }
 
 /* ---------- meal plan (all recipes finish together) ---------- */
-let PLAN = { total:0, blocks:[] };
+let PLAN = { total:0, blocks:[], conflicts:[], notes:[], multiDay:false };
 function buildPlan(){
-  const plans = S.recipes.map(r=>({ r, p: recipePlan(r) }));
-  /* All prep happens first, as one block. Then each recipe's cooking is timed to end together. */
-  const prepTotal = plans.reduce((a,x)=>a+x.p.prepDur,0);
-  const total = prepTotal + Math.max(0, ...plans.map(x=>x.p.total));
+  const T = S.target || null;
+  const ctx = makeCtx(T);
+  const per = S.recipes.map(r=>({ r, p: recipeSchedule(r, ctx) }));
+  const all = [];
+  /* Prep for recipes that start cooking the same day happens together, right before the first of them. */
+  const groups = new Map();
+  per.forEach(x=>{ if (!x.p.prepDur) return; const d = T ? dayKey(T + x.p.firstStart*60000) : "all"; if (!groups.has(d)) groups.set(d, []); groups.get(d).push(x); });
+  groups.forEach((list, d)=>{
+    const sum = list.reduce((a,x)=>a + x.p.prepDur, 0);
+    const e = Math.min(...list.map(x=>x.p.firstStart));
+    let b = e - sum;
+    const key = "prep:" + d;
+    if (!ctx.ok(b, e, true) && !S.approved[key]) {
+      const nb = ctx.search(b-5, b - 1440, x=>ctx.ok(x, x + sum, true));
+      if (nb != null) { ctx.notes.push({ x:nb, name:list.map(x=>x.r.name).join(" + "), text:"Prep moved earlier to stay out of quiet hours." }); b = nb; }
+      else ctx.conflicts.push({ key, x:b, name:list.map(x=>x.r.name).join(" + "), text:"Prep work" });
+    }
+    list.forEach(({r,p})=>all.push({ x:b, dur:sum, kind:"prep", r, ings:p.prepIngs, tasks:p.prepTasks, key }));
+  });
+  per.forEach(({r,p})=>p.blocks.forEach(bl=>all.push(Object.assign({ r }, bl))));
+  const start = Math.min(0, ...all.map(a=>a.x));
+  const total = -start;
   const byOff = new Map();
-  plans.forEach(({r,p})=>{
-    const shift = total - p.total;
-    const list = p.prep ? [{ off:-shift, dur:prepTotal, kind:"prep", ings:p.prep.ings, tasks:p.prep.tasks }, ...p.blocks] : p.blocks;
-    list.forEach(b=>{
-      const abs = Math.max(0, Math.round(shift + b.off));
-      if (!byOff.has(abs)) byOff.set(abs, { off:abs, groups:[], kinds:new Set(), dur:0 });
-      const B = byOff.get(abs);
-      B.kinds.add(b.kind); B.dur = Math.max(B.dur, b.dur);
-      let g = B.groups.find(x=>x.rid===r.id);
-      if (!g) { g = { rid:r.id, label:r.name, color:r.color, ings:[], tasks:[] }; B.groups.push(g); }
-      g.ings.push(...b.ings); g.tasks.push(...b.tasks);
-    });
+  all.forEach(b=>{
+    const off = Math.max(0, Math.round(b.x - start));
+    if (!byOff.has(off)) byOff.set(off, { off, groups:[], kinds:new Set(), dur:0, keys:new Set() });
+    const B = byOff.get(off);
+    B.kinds.add(b.kind); B.dur = Math.max(B.dur, b.dur); if (b.key) B.keys.add(b.key);
+    let g = B.groups.find(x=>x.rid===b.r.id);
+    if (!g) { g = { rid:b.r.id, label:b.r.name, color:b.r.color, ings:[], tasks:[] }; B.groups.push(g); }
+    g.ings.push(...b.ings); g.tasks.push(...b.tasks);
   });
   const blocks = [...byOff.values()].sort((a,b)=>a.off-b.off);
   blocks.forEach(B=>{
     if (B.kinds.size===1 && B.kinds.has("serve")) B.headline = "Ready. Plate and serve.";
     else if (B.kinds.has("prep")) B.headline = "Prep work. Get everything cut and measured.";
     else if (B.groups.length > 1) B.headline = B.groups.map(g=>g.label).join(" + ");
-    else { const t = B.groups[0].tasks[0][1]; B.headline = t.length > 90 ? t.slice(0,87).replace(/\s+\S*$/,"")+"…" : t; }
+    else B.headline = short(B.groups[0].tasks[0][1], 90);
+    B.conflicts = ctx.conflicts.filter(c=>B.keys.has(c.key));
   });
-  PLAN = { total, blocks };
+  const multiDay = T ? dayKey(T + start*60000) !== dayKey(T) : total >= 1440;
+  PLAN = { total, blocks, conflicts: ctx.conflicts, notes: ctx.notes, multiDay, start };
   if (S.idx >= blocks.length) S.idx = 0;
 }
 
@@ -379,7 +483,10 @@ function fmt(ms, withDay){
   return s;
 }
 function rel(off){ const h=Math.floor(off/60), m=off%60; return "+" + h + ":" + String(m).padStart(2,"0"); }
-function label(B){ const a = anchor(); return a ? fmt(a + B.off*60000) : rel(B.off); }
+function wday(ms){ return new Date(ms).toLocaleDateString([], {weekday:"short"}); }
+function label(B){ const a = anchor(); if (!a) return rel(B.off); const ms = a + B.off*60000; return PLAN.multiDay ? wday(ms) + " " + fmt(ms) : fmt(ms); }
+function whenX(x){ return S.target ? wday(S.target + x*60000) + " " + fmt(S.target + x*60000) : rel(Math.round(x - PLAN.start)); }
+function dtLocal(ms){ const d = new Date(ms), z = n=>String(n).padStart(2,"0"); return d.getFullYear()+"-"+z(d.getMonth()+1)+"-"+z(d.getDate())+"T"+z(d.getHours())+":"+z(d.getMinutes()); }
 
 /* ============================================================
    Rendering
@@ -391,7 +498,7 @@ function renderTools(){
   if (S.view === "setup") { tools.innerHTML = list + (S.recipes.length ? `<button class="chip-btn" data-act="cook" type="button">Cook view</button>` : ""); return; }
   if (S.view === "list") { tools.innerHTML = `<button class="chip-btn" data-act="setup" type="button">Recipes</button><button class="chip-btn" data-act="cook" type="button">Cook view</button>`; return; }
   tools.innerHTML = `<button class="chip-btn" data-act="setup" type="button">Recipes</button>` + list
-    + `<button class="chip-btn ${S.target?"set":""}" data-act="ready" type="button">${S.target ? "Ready "+fmt(S.target) : "Ready by"}</button>`
+    + `<button class="chip-btn ${S.target?"set":""}" data-act="ready" type="button">${S.target ? "Eat "+fmt(S.target, true).replace(" today","") : "Eat at"}</button>`
     + (anchor() ? `<button class="chip-btn" data-act="now" type="button">Now</button>` : "")
     + `<button class="chip-btn" data-act="reset" type="button">Reset</button>`;
 }
@@ -406,7 +513,7 @@ function render(){
 /* ---------- setup ---------- */
 let importMsg = "", importErr = false, busy = false, pasteOpen = false;
 try { const m = sessionStorage.getItem("rgp-msg"); if (m) { importMsg = m; sessionStorage.removeItem("rgp-msg"); } } catch(e) {}
-function totalFor(r){ const p = recipePlan(r); return p.total + p.prepDur; }
+function totalFor(r){ const p = recipeSchedule(r, makeCtx(null)); return -Math.min(0, p.firstStart - p.prepDur, ...p.blocks.map(b=>b.x)); }
 function renderSetup(){
   tl.innerHTML = ""; tl.style.display = "none"; nav.style.display = "none";
   let h = `<h2>Add a recipe</h2>
@@ -443,6 +550,11 @@ function renderSetup(){
         h += `<div class="st"><div class="tx"><b>Prep</b> · ${prepItems(r).map(p=>esc(p.name)).join(", ")}</div>
           <div><input type="number" min="0" inputmode="numeric" data-prep="${r.id}" value="${r.prepOver!=null && r.prepOver!=="" ? r.prepOver : auto}" class="${r.prepOver!=null && r.prepOver!=="" ? "edited":""}" aria-label="Prep minutes"><div class="u">min</div></div></div>`;
       }
+      advItems(r).forEach(p=>{
+        const ov = r.advOver && r.advOver[p.i]!=null && r.advOver[p.i]!=="";
+        h += `<div class="st"><div class="tx"><b>Ahead</b> · ${esc(p.name)}: ${esc(p.prep)}</div>
+          <div><input type="number" min="0" inputmode="numeric" data-adv="${r.id}:${p.i}" value="${ov ? r.advOver[p.i] : autoAdvMin(p)}" class="${ov?"edited":""}" aria-label="Minutes ahead"><div class="u">min</div></div></div>`;
+      });
       r.steps.forEach((st,si)=>{
         const auto = autoStepMin(r, si);
         const ov = r.over[si]!=null && r.over[si]!=="";
@@ -456,12 +568,24 @@ function renderSetup(){
   });
 
   if (S.recipes.length) {
-    h += `<h2>Ready by</h2>
+    h += `<h2>Eat at</h2>
     <div class="card">
-      <div class="readyrow"><input type="time" id="readyIn" step="300" value="${S.target ? hhmm(S.target) : ""}" aria-label="Ready by time">
+      <div class="readyrow"><input type="datetime-local" id="readyIn" step="300" value="${S.target ? dtLocal(S.target) : ""}" aria-label="Eat date and time">
       ${S.target ? `<button class="btn" type="button" data-act="clearReady">Clear</button>` : ""}</div>
-      <div class="hint">${S.target ? `Start at <b style="color:var(--accent)">${fmt(S.target - PLAN.total*60000, true)}</b> to have everything ready at ${fmt(S.target, true)}. Total plan: ${fmtDur(PLAN.total)}.` : `Optional. Set it and every step gets a clock time. Total plan: ${fmtDur(PLAN.total)}.`}</div>
-    </div>
+      <div class="hint">${S.target ? `Start at <b style="color:var(--accent)">${wday(S.target - PLAN.total*60000)} ${fmt(S.target - PLAN.total*60000)}</b> to eat ${wday(S.target)} ${fmt(S.target)}. Total plan: ${fmtDur(PLAN.total)}.` : `Optional. Set it and every step gets a day and clock time. Total plan: ${fmtDur(PLAN.total)}.`}</div>
+      <label class="qrow"><input type="checkbox" id="qOn" ${S.quiet.on?"checked":""}> Quiet hours</label>
+      ${S.quiet.on ? `<div class="row qtimes"><input type="time" id="qFrom" step="900" value="${S.quiet.from}" aria-label="Quiet hours start"><span>to</span><input type="time" id="qTo" step="900" value="${S.quiet.to}" aria-label="Quiet hours end"></div>
+      <div class="hint">No hands-on steps in this window. Brines, marinades and other flexible waits stretch to make room.${S.target ? "" : " Applies once you set an eat time."}</div>` : ""}
+      ${PLAN.notes.length ? `<div class="hint" style="color:var(--done)">${PLAN.notes.map(n=>esc(n.name + ": " + n.text)).join("<br>")}</div>` : ""}
+    </div>`;
+    if (PLAN.conflicts.length) {
+      h += `<h2 style="color:var(--warn)">Needs your OK</h2><div class="card">`;
+      PLAN.conflicts.forEach(c=>{ h += `<div class="cf"><div><b>${esc(whenX(c.x))}</b> · ${esc(c.name)}<br>${esc(short(c.text, 120))}</div>
+        <div class="hint" style="margin-top:4px">This lands in quiet hours, and moving it would change a cook time.</div>
+        <button class="btn sm" type="button" data-act="approve" data-key="${esc(c.key)}" style="margin-top:8px">Approve</button></div>`; });
+      h += `</div>`;
+    }
+    h += `
     <button class="big solid" type="button" data-act="cook">Build the game plan</button>`;
   } else if (!S.library.length) {
     h += `<button class="linkbtn" type="button" data-act="sample">Try it with a sample recipe</button>`;
@@ -551,9 +675,11 @@ function renderCook(){
   const a = anchor();
   const big = a ? fmt(a + B.off*60000) : rel(B.off);
   const dayNote = a && fmt(a + B.off*60000, true).split(" ")[1] !== "today" ? " · " + fmt(a + B.off*60000, true).split(" ").slice(1).join(" ") : "";
-  let h = `<div class="when"><div class="time">${big}</div><div class="count">Step ${S.idx+1} of ${blocks.length} · ${n}/${all.length} done${a ? " · "+rel(B.off)+" from start" : ""}${dayNote}${B.dur ? " · about "+fmtDur(B.dur) : ""}</div></div>
+  const dayHead = a && PLAN.multiDay ? `<div class="dayh">${new Date(a + B.off*60000).toLocaleDateString([], {weekday:"long", month:"short", day:"numeric"})}</div>` : "";
+  let h = dayHead + `<div class="when"><div class="time">${big}</div><div class="count">Step ${S.idx+1} of ${blocks.length} · ${n}/${all.length} done${a ? " · "+rel(B.off)+" from start" : ""}${dayNote}${B.dur ? " · about "+fmtDur(B.dur) : ""}</div></div>
     <div class="headline">${esc(B.headline)}</div>
     ${statusHtml(S.idx)}
+    ${B.conflicts.filter(c=>!S.approved[c.key]).map(c=>`<div class="status late"><b>Quiet hours.</b> This lands at ${esc(whenX(c.x))} and moving it would change a cook time. <button class="btn sm" type="button" data-act="approve" data-key="${esc(c.key)}" style="margin-top:8px">Approve</button></div>`).join("")}
     <div class="progress"><div style="width:${all.length ? n/all.length*100 : 0}%"></div></div>`;
   B.groups.forEach(g=>{
     h += `<section class="group"><div class="tag" style="color:${g.color}"><i style="background:${g.color}"></i>${esc(g.label)}</div>`;
@@ -687,7 +813,8 @@ document.addEventListener("click", e=>{
     else if (act==="review" && r) { S.open[id] = !S.open[id]; save(); render(); }
     else if (act==="remove" && r) ask(`Remove <b>${esc(r.name)}</b> from this meal?`, "Remove", ()=>{ S.recipes = S.recipes.filter(x=>x.id!==id); delete S.open[id]; afterChange(); render(); });
     else if (act==="rename" && r) ask(`<label for="rn" style="display:block;margin-bottom:8px;color:var(--muted)">Recipe name</label><input class="field" id="rn" value="${esc(r.name)}">`, "Save", ()=>{ const v = document.getElementById("rn").value.trim(); if (v) { r.name = v; syncLib(r); buildPlan(); save(); render(); } });
-    else if (act==="clearReady") { S.target = null; save(); render(); }
+    else if (act==="clearReady") { S.target = null; buildPlan(); save(); render(); }
+    else if (act==="approve") { S.approved[t.dataset.key] = true; buildPlan(); save(); const y = window.scrollY; render(); window.scrollTo(0,y); }
     else if (act==="cook") { buildPlan(); S.view = "cook"; save(); render(); window.scrollTo(0,0); }
     else if (act==="setup") { S.view = "setup"; save(); render(); window.scrollTo(0,0); }
     else if (act==="start") { S.startAt = Date.now(); save(); go(S.idx); }
@@ -697,7 +824,7 @@ document.addEventListener("click", e=>{
       PLAN.blocks.forEach((b,i)=>{ if (el >= b.off) pick = i; });
       go(pick);
     }
-    else if (act==="ready") ask(`<label for="rt" style="display:block;margin-bottom:8px;color:var(--muted)">Everything ready at</label><input class="field" type="time" id="rt" step="300" style="color-scheme:dark;font-size:20px" value="${S.target ? hhmm(S.target) : ""}">`, "Set", ()=>{ setReady(document.getElementById("rt").value); });
+    else if (act==="ready") ask(`<label for="rt" style="display:block;margin-bottom:8px;color:var(--muted)">Eat at</label><input class="field" type="datetime-local" id="rt" step="300" style="color-scheme:dark;font-size:18px" value="${S.target ? dtLocal(S.target) : ""}">`, "Set", ()=>{ setReady(document.getElementById("rt").value); });
     else if (act==="reset") ask("Clear every checkbox and stop the clock? Your recipes and ready time stay.", "Reset", ()=>{ S.done = {}; S.startAt = null; S.idx = 0; save(); render(); });
     return;
   }
@@ -705,10 +832,11 @@ document.addEventListener("click", e=>{
 });
 function setReady(v){
   if (!v) return;
-  const [h,m] = v.split(":").map(Number);
-  const t = new Date(); t.setHours(h,m,0,0);
-  if (t.getTime() <= (S.startAt || Date.now())) t.setDate(t.getDate()+1);
-  S.target = t.getTime(); save(); render();
+  let t;
+  if (v.includes("T")) t = new Date(v);
+  else { const [h,m] = v.split(":").map(Number); t = new Date(); t.setHours(h,m,0,0); if (t.getTime() <= (S.startAt || Date.now())) t.setDate(t.getDate()+1); }
+  if (isNaN(t)) return;
+  S.target = t.getTime(); S.approved = {}; buildPlan(); save(); render();
 }
 document.addEventListener("change", e=>{
   const el = e.target;
@@ -721,6 +849,17 @@ document.addEventListener("change", e=>{
     save(); const y = window.scrollY; render(); window.scrollTo(0,y); return;
   }
   if (el.id === "readyIn") { if (el.value) setReady(el.value); return; }
+  if (el.id === "qOn" || el.id === "qFrom" || el.id === "qTo") {
+    if (el.id === "qOn") S.quiet.on = el.checked; else if (el.value) S.quiet[el.id === "qFrom" ? "from" : "to"] = el.value;
+    buildPlan(); save(); const y = window.scrollY; render(); window.scrollTo(0,y); return;
+  }
+  if (el.dataset.adv) {
+    const [rid, i] = el.dataset.adv.split(":"); const r = S.recipes.find(x=>x.id===rid); if (!r) return;
+    const p = advItems(r).find(x=>x.i===+i); if (!p) return;
+    r.advOver = r.advOver || {};
+    if (el.value==="" || +el.value===autoAdvMin(p)) delete r.advOver[i]; else r.advOver[i] = Math.max(0, Math.round(+el.value));
+    syncLib(r); buildPlan(); save(); const y = window.scrollY; render(); window.scrollTo(0,y); return;
+  }
   if (el.dataset.step) {
     const [rid, si] = el.dataset.step.split(":"); const r = S.recipes.find(x=>x.id===rid); if (!r) return;
     const auto = autoStepMin(r, +si);
