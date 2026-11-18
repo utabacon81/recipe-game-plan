@@ -123,7 +123,8 @@ export async function onRequest({ request, env }){
       const ops = [db.prepare("INSERT INTO devices (id, endpoint, sub, updated) VALUES (?, ?, ?, ?) ON CONFLICT (id) DO UPDATE SET endpoint = excluded.endpoint, sub = excluded.sub, updated = excluded.updated")
         .bind(b.device, b.sub.endpoint, JSON.stringify(b.sub), now)];
       if (b.test) {
-        ops.push(db.prepare("INSERT INTO alerts (device, at, title, body, tag) VALUES (?, ?, ?, ?, ?)").bind(b.device, now, "Test alert", "Step alerts are working on this phone.", "rgp-test"));
+        const when = typeof b.when === "string" ? b.when.slice(0, 20) : "";
+        ops.push(db.prepare("INSERT INTO alerts (device, at, title, body, tag) VALUES (?, ?, ?, ?, ?)").bind(b.device, now, "Test alert", "Step alerts are working on this phone." + (when ? " Sent " + when + "." : ""), "rgp-test-" + now));
         await db.batch(ops);
         return json({ ok: true });
       }

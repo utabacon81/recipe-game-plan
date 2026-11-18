@@ -1068,7 +1068,7 @@ async function disableAlerts(){
 async function testAlert(){
   try {
     const sub = await currentSub();
-    const res = await fetch("/api/push", { method:"POST", headers:{"content-type":"application/json"}, body: JSON.stringify({ device:S.alerts.device, sub, test:true }) });
+    const res = await fetch("/api/push", { method:"POST", headers:{"content-type":"application/json"}, body: JSON.stringify({ device:S.alerts.device, sub, test:true, when: fmt(Date.now()) }) });
     if (!res.ok) throw new Error((await res.json()).error);
     alertErr = false; alertMsg = "Test queued. Waiting for the next tick, up to a minute. You can switch apps.";
     render(); watchTest(Date.now());
