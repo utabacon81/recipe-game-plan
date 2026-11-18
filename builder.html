@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Recipe Builder · Recipe Game Plan</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{ --bg:#1E1C1A; --panel:#272421; --line:#3A3632; --text:#F4EFE8; --muted:#BDB4A9; --accent:#F08A3C; --done:#7FB5A8; --warn:#E06C5A; }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);color:var(--text);font-family:Inter,system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+  button{font-family:inherit}
+  header{position:sticky;top:0;z-index:5;background:var(--bg);border-bottom:1px solid var(--line);padding:12px 16px 10px}
+  .top{display:flex;align-items:center;justify-content:space-between;gap:12px;max-width:720px;margin:0 auto}
+  .brand{font-family:Oswald,sans-serif;font-weight:600;letter-spacing:3px;text-transform:uppercase;font-size:14px;color:var(--accent)}
+  .chip-btn{background:none;border:1px solid var(--line);color:var(--text);border-radius:20px;padding:8px 14px;font:500 14px Inter,sans-serif;min-height:40px;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center}
+  main{max-width:720px;margin:0 auto;padding:20px 16px 60px}
+  h1{font:700 30px Oswald,sans-serif;color:var(--accent);margin:4px 0 0;line-height:1.1}
+  h2{font:600 15px Oswald,sans-serif;letter-spacing:2px;text-transform:uppercase;color:var(--muted);margin:28px 0 10px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px}
+  label.lb{display:block;font-size:14px;color:var(--muted);margin:12px 0 6px}
+  label.lb:first-child{margin-top:0}
+  .field{width:100%;min-height:52px;border-radius:12px;border:1px solid var(--line);background:var(--bg);color:var(--text);font:500 16px Inter,sans-serif;padding:12px 14px}
+  textarea.field{min-height:200px;resize:vertical;line-height:1.5}
+  .row{display:flex;gap:10px}
+  .row .field{flex:1;min-width:0}
+  .btn{min-height:52px;border-radius:12px;border:1px solid var(--line);background:none;color:var(--text);font:600 16px Inter,sans-serif;padding:0 16px;cursor:pointer}
+  .btn.go{background:var(--accent);border-color:var(--accent);color:#1E1C1A}
+  .btn:disabled{opacity:.4}
+  .linkbtn{background:none;border:none;color:var(--accent);font:500 15px Inter,sans-serif;padding:10px 0;cursor:pointer;text-decoration:underline;text-underline-offset:3px}
+  .hint{color:var(--muted);font-size:14px;line-height:1.5;margin-top:8px}
+  .hint code{background:#36312c;border-radius:5px;padding:1px 6px;color:var(--text);font:500 13px ui-monospace,monospace}
+  .msg{margin-top:10px;font-size:15px;line-height:1.45}
+  .msg.err{color:#F0A99D}
+  .msg.ok{color:var(--done)}
+  .notice{border:1px dashed #5a4a3c;border-radius:12px;padding:10px 14px;color:#E9CDB4;font-size:15px;line-height:1.45;margin-top:14px}
+  .pv{margin:0;padding:0;list-style:none}
+  .pv li{display:flex;gap:10px;align-items:flex-start;padding:10px 0;border-top:1px solid #36312c;font-size:14px;line-height:1.45}
+  .pv li:first-child{border-top:none}
+  .pv .n{font:600 14px Oswald,sans-serif;color:var(--muted);min-width:22px}
+  .pv .tx{flex:1;min-width:0}
+  .pill{flex:0 0 auto;border-radius:10px;padding:2px 9px;font:600 12px Inter,sans-serif;white-space:nowrap}
+  .pill.h{background:#4a3524;color:#F6C9A3}
+  .pill.w{background:#3f5a53;color:#CFE7E0}
+  .pill.e{background:#3A3632;color:var(--muted)}
+  .tot{margin-top:12px;font-size:15px;color:var(--text)}
+  .tot b{color:var(--accent)}
+  .big{width:100%;min-height:56px;border-radius:14px;border:1px solid var(--accent);background:none;color:var(--accent);font:600 18px Oswald,sans-serif;letter-spacing:1px;text-transform:uppercase;cursor:pointer;margin-top:12px}
+  .big.solid{background:var(--accent);color:#1E1C1A}
+</style>
+</head>
+<body>
+<header>
+  <div class="top">
+    <div class="brand">Game Plan</div>
+    <a class="chip-btn" href="index.html" id="back">Back to recipes</a>
+  </div>
+</header>
+<main>
+  <h1 id="title">Build a recipe</h1>
+  <div id="notice"></div>
+
+  <h2>Start from a similar recipe</h2>
+  <div class="card">
+    <div class="hint" style="margin-top:0">Optional. Search for your dish, pick one close to yours, and paste its link. It fills in everything below so you can change it to match yours.</div>
+    <button class="btn" type="button" id="find" style="width:100%;margin-top:10px">Find similar online</button>
+    <div class="row" style="margin-top:10px">
+      <input class="field" id="simUrl" type="text" inputmode="url" autocapitalize="off" spellcheck="false" placeholder="Paste the link you picked" aria-label="Similar recipe link">
+      <button class="btn go" type="button" id="useUrl">Use it</button>
+    </div>
+    <button class="linkbtn" type="button" id="togglePaste">Or paste its text</button>
+    <div id="pasteWrap" hidden>
+      <textarea class="field" id="simText" placeholder="Paste the title, ingredients and instructions" style="min-height:140px"></textarea>
+      <button class="btn go" type="button" id="useText" style="width:100%;margin-top:10px">Use this text</button>
+    </div>
+    <div id="simMsg"></div>
+  </div>
+
+  <h2>Recipe</h2>
+  <div class="card">
+    <label class="lb" for="name">Name</label>
+    <input class="field" id="name" type="text" placeholder="Beef and pork chili">
+    <div class="row">
+      <div style="flex:1;min-width:0"><label class="lb" for="yld">Serves</label><input class="field" id="yld" type="text" inputmode="text" placeholder="6 to 8"></div>
+      <div style="flex:2;min-width:0"><label class="lb" for="url">Based on (link)</label><input class="field" id="url" type="text" inputmode="url" autocapitalize="off" spellcheck="false" placeholder="Optional"></div>
+    </div>
+  </div>
+
+  <h2>Ingredients</h2>
+  <textarea class="field" id="ings" placeholder="2 lb beef chuck, cut into 1/2 inch cubes&#10;1 lb pork shoulder, cubed&#10;2 medium onions, diced&#10;4 cloves garlic, minced"></textarea>
+  <div class="hint">One per line. Prep after a comma (diced, minced, cubed) becomes a prep task. Lines ending in a colon, like <code>For the topping:</code>, are skipped.</div>
+
+  <h2>Steps</h2>
+  <textarea class="field" id="steps" placeholder="Brown the chuck and pork in batches 15m&#10;Sweat the onions and peppers 8m&#10;Add the garlic and spices 2m&#10;Add beer, tomatoes and beans. Simmer covered 1h30m wait&#10;Adjust the seasoning and serve"></textarea>
+  <div class="hint">One step per line. To set a time, end the line with <code>12m</code>, <code>1h</code> or <code>1h30m</code>. Add <code>wait</code> for hands-off time: <code>Simmer covered 1h30m wait</code>. Hands-on time grows with batch size, wait time doesn't. With no tag, the time is estimated from the text.</div>
+
+  <h2>Preview</h2>
+  <div class="card"><ul class="pv" id="pv"></ul><div class="tot" id="tot"></div></div>
+
+  <div id="saveMsg"></div>
+  <button class="big solid" type="button" id="saveMeal">Save and add to meal</button>
+  <button class="big" type="button" id="saveBox">Save to recipe box</button>
+  <button class="linkbtn" type="button" id="discard">Discard changes</button>
+</main>
+
+<script src="core.js"></script>
+<script>
+const DRAFT = "recipe-game-plan-draft";
+const $ = id=>document.getElementById(id);
+const F = ["name","yld","url","ings","steps"];
+
+function loadS(){
+  let s = null;
+  try { s = JSON.parse(localStorage.getItem(KEY)); } catch(e) {}
+  if (!s || !Array.isArray(s.recipes)) s = { view:"setup", recipes:[], library:[], target:null, startAt:null, idx:0, done:{}, open:{}, have:{} };
+  if (!Array.isArray(s.library)) s.library = [];
+  return s;
+}
+const params = new URLSearchParams(location.search);
+const editId = params.get("id") || null;
+const S0 = loadS();
+const editing = editId ? (S0.library.find(x=>x.id===editId) || S0.recipes.find(x=>x.id===editId)) : null;
+/* basis = the recipe the form started from (the one being edited, or an imported similar recipe).
+   Step lines left unchanged keep that recipe's exact step data and time fixes. */
+let basis = editing ? JSON.parse(JSON.stringify(editing)) : null;
+
+/* ---------- step lines ---------- */
+function fmtTag(m){ m = Math.max(0, Math.round(m)); const h = Math.floor(m/60), mm = m%60; return h ? h+"h"+(mm ? mm+"m" : "") : mm+"m"; }
+function stepToLine(st, ov){
+  const text = st.sents.map(s=>s.t).join(" ");
+  const real = st.sents.filter(s=>!s.pre);
+  if (!real.length) return text;
+  const mins = (ov!=null && ov!=="") ? +ov : real.reduce((a,s)=>a+s.m, 0);
+  /* Mixed steps (a timed simmer plus a little hands-on work) are tagged by the bigger part. */
+  const timed = real.filter(s=>s.timed).reduce((a,s)=>a+s.m,0), act = real.filter(s=>!s.timed).reduce((a,s)=>a+s.m,0);
+  const wait = timed > 0 && timed >= act;
+  return text + " " + fmtTag(mins) + (wait ? " wait" : "");
+}
+function cleanLine(l){ return l.trim().replace(/^[-•*▢☐□]\s*/,"").replace(/^(step\s*)?\d+[.):]\s*/i,"").trim(); }
+function splitTag(line){
+  let text = line, wait = false, min = null;
+  const w = text.match(/\s+wait$/i);
+  if (w) { wait = true; text = text.slice(0, w.index); }
+  const t = text.match(/\s+(?:(\d+(?:\.\d+)?)h)?\s?(?:(\d+)m(?:in)?)?$/i);
+  if (t && (t[1] || t[2])) { min = Math.round((+t[1]||0)*60 + (+t[2]||0)); text = text.slice(0, t.index); }
+  return { text: text.trim(), wait, min };
+}
+function lineToStep(line){
+  const { text, wait, min } = splitTag(line);
+  const sents = sentences(text).map(t=>{
+    const pre = /\bpre-?heat\b/i.test(t), d = durMin(t);
+    return { t, m: pre ? 0 : (d || 2), timed: !!d && !pre, pre };
+  });
+  if (!sents.length) return null;
+  if (min != null) {
+    let first = true;
+    sents.forEach(s=>{ if (s.pre) return; if (first) { s.m = min; s.timed = wait; first = false; } else { s.m = 0; s.timed = false; } });
+  } else if (wait) sents.forEach(s=>{ if (!s.pre) s.timed = true; });
+  return { sents, tagged: min != null || wait };
+}
+function basisMap(){
+  const m = new Map();
+  if (basis) basis.steps.forEach((st,i)=>{ const k = stepToLine(st, basis.over && basis.over[i]); if (!m.has(k)) m.set(k, { st, ov: basis.over ? basis.over[i] : null }); });
+  return m;
+}
+/* Turn the step box into steps plus time fixes. */
+function readSteps(){
+  const map = basisMap(), steps = [], over = {}, info = [];
+  $("steps").value.split(/\r?\n/).map(cleanLine).filter(Boolean).forEach(l=>{
+    const hit = map.get(l);
+    if (hit) {
+      steps.push(JSON.parse(JSON.stringify(hit.st)));
+      if (hit.ov!=null && hit.ov!=="") over[steps.length-1] = hit.ov;
+      info.push({ tagged:true });
+    } else {
+      const st = lineToStep(l); if (!st) return;
+      info.push({ tagged: st.tagged }); delete st.tagged; steps.push(st);
+    }
+  });
+  return { steps, over, info };
+}
+function readIngs(){ return $("ings").value.split(/\r?\n/).map(l=>decode(l.replace(/^[-•*▢☐□]\s*/,""))).filter(l=>l && !/:\s*$/.test(l)); }
+
+/* ---------- form ---------- */
+function fill(r){
+  $("name").value = r ? r.name || "" : "";
+  $("yld").value = r ? r.yld || "" : "";
+  $("url").value = r ? r.url || "" : "";
+  $("ings").value = r ? r.ings.join("\n") : "";
+  $("steps").value = r ? r.steps.map((st,i)=>stepToLine(st, r.over && r.over[i])).join("\n") : "";
+}
+function formVals(){ const o = {}; F.forEach(k=>o[k] = $(k).value); return o; }
+function saveDraft(){ try { localStorage.setItem(DRAFT, JSON.stringify({ editId, fields: formVals(), basis })); } catch(e) {} }
+function clearDraft(){ try { localStorage.removeItem(DRAFT); } catch(e) {} }
+
+function preview(){
+  const { steps, over, info } = readSteps();
+  let hands = 0, waits = 0;
+  $("pv").innerHTML = steps.length ? steps.map((st,i)=>{
+    const real = st.sents.filter(s=>!s.pre);
+    const text = st.sents.map(s=>s.t).join(" ");
+    let pill;
+    if (!real.length) pill = `<span class="pill e">Preheat</span>`;
+    else {
+      const ov = over[i]!=null && over[i]!=="";
+      const timed = real.filter(s=>s.timed).reduce((a,s)=>a+s.m,0), act = real.filter(s=>!s.timed).reduce((a,s)=>a+s.m,0);
+      const tot = ov ? +over[i] : timed + act;
+      const est = info[i].tagged ? "" : " est.";
+      if (!ov && timed > 0 && act > 0) {
+        waits += timed; hands += act;
+        pill = `<span class="pill w">${fmtDur(timed)} wait + ${fmtDur(act)}${est}</span>`;
+      } else {
+        const isWait = timed > 0 && timed >= act;
+        if (isWait) waits += tot; else hands += tot;
+        pill = `<span class="pill ${isWait ? "w" : "h"}">${fmtDur(tot)} ${isWait ? "wait" : "hands-on"}${est}</span>`;
+      }
+    }
+    return `<li><span class="n">${i+1}</span><span class="tx">${esc(text.length > 140 ? text.slice(0,137)+"…" : text)}</span>${pill}</li>`;
+  }).join("") : `<li><span class="tx" style="color:var(--muted)">Steps show up here as you type.</span></li>`;
+  const ings = readIngs();
+  const nPrep = ings.map(parseIng).filter(p=>p.prep).length;
+  const prep = nPrep ? Math.max(5, nPrep*3) : 0;
+  $("tot").innerHTML = steps.length ? `About <b>${fmtDur(prep + hands + waits)}</b> at 1x: ${fmtDur(prep)} prep, ${fmtDur(hands)} hands-on, ${fmtDur(waits)} waiting. ${ings.length} ingredient${ings.length===1?"":"s"}.` : "";
+}
+
+function onInput(){ preview(); saveDraft(); }
+F.forEach(k=>$(k).addEventListener("input", onInput));
+
+/* ---------- similar recipe ---------- */
+function setSim(text, err){ $("simMsg").innerHTML = text ? `<div class="msg ${err?"err":"ok"}">${esc(text)}</div>` : ""; }
+function useRecipe(r, label){
+  const hasWork = $("ings").value.trim() || $("steps").value.trim();
+  if (hasWork && !confirm("Replace the ingredients and steps below with " + label + "?")) return;
+  const keepName = $("name").value.trim();
+  basis = r; fill(r);
+  if (keepName) $("name").value = keepName;
+  preview(); saveDraft();
+  setSim("Loaded " + label + ". Now change it to match yours.");
+}
+$("find").onclick = ()=>{
+  const q = ($("name").value.trim() || "") + " recipe";
+  if (!$("name").value.trim()) { setSim("Type the dish name first, then search.", true); $("name").focus(); return; }
+  saveDraft();
+  window.open("https://www.google.com/search?q=" + encodeURIComponent(q), "_blank");
+};
+$("useUrl").onclick = async ()=>{
+  let u = $("simUrl").value.trim(); if (!u) return;
+  if (!/^https?:\/\//i.test(u)) u = "https://" + u;
+  const b = $("useUrl"); b.disabled = true; b.textContent = "Reading"; setSim("");
+  try {
+    let data = null;
+    try { const res = await fetch("/api/recipe?url=" + encodeURIComponent(u)); data = await res.json(); } catch(e) {}
+    if (!data) throw new Error("The import service didn't answer. Paste its text instead.");
+    let r = null;
+    if (data.recipe) r = fromJsonLd(data.recipe, data.url || u);
+    else if (data.text) { r = fromText(data.text, ""); r.name = data.title || "Imported recipe"; r.url = u; }
+    if (!r) throw new Error((data.error || "Couldn't read that page.") + (data.tried ? " (Tried: " + data.tried.map(t=>t.via + " " + t.status).join(", ") + ")" : ""));
+    if (!r.ings.length || !r.steps.length) throw new Error("Found the page but couldn't pick out the ingredients and steps. Paste its text instead.");
+    useRecipe(r, r.name);
+    $("simUrl").value = "";
+  } catch(e) { setSim(e.message || String(e), true); $("pasteWrap").hidden = false; }
+  b.disabled = false; b.textContent = "Use it";
+};
+$("togglePaste").onclick = ()=>{ $("pasteWrap").hidden = !$("pasteWrap").hidden; };
+$("useText").onclick = ()=>{
+  const r = fromText($("simText").value, "");
+  if (!r.ings.length || !r.steps.length) { setSim("Couldn't find both ingredients and steps. Put an Ingredients heading and an Instructions heading above each list.", true); return; }
+  useRecipe(r, r.name && r.name !== "Untitled recipe" ? r.name : "the pasted recipe");
+  $("simText").value = ""; $("pasteWrap").hidden = true;
+};
+
+/* ---------- save ---------- */
+function setSave(text){ $("saveMsg").innerHTML = text ? `<div class="msg err">${esc(text)}</div>` : ""; }
+function save(addToMeal){
+  const name = $("name").value.trim();
+  const ings = readIngs();
+  const { steps, over } = readSteps();
+  if (!name) { setSave("Give it a name."); $("name").focus(); return; }
+  if (!ings.length) { setSave("Add at least one ingredient."); return; }
+  if (!steps.length) { setSave("Add at least one step."); return; }
+  const now = Date.now();
+  const ingsSame = editing && JSON.stringify(editing.ings) === JSON.stringify(ings);
+  const rec = {
+    id: editing ? editing.id : "r" + now.toString(36) + Math.random().toString(36).slice(2,6),
+    name, url: $("url").value.trim(), yld: $("yld").value.trim(),
+    ings, steps, over,
+    prepOver: ingsSame ? editing.prepOver : null,
+    saved: (editing && editing.saved) || now, used: now
+  };
+  const S = loadS();
+  const li = S.library.findIndex(x=>x.id===rec.id);
+  if (li >= 0) S.library[li] = rec; else S.library.unshift(rec);
+  const mi = S.recipes.findIndex(x=>x.id===rec.id);
+  let msg;
+  if (mi >= 0 || addToMeal) {
+    if (mi >= 0) {
+      const old = S.recipes[mi];
+      S.recipes[mi] = Object.assign(JSON.parse(JSON.stringify(rec)), { k: old.k || 1, color: old.color });
+      Object.keys(S.have || {}).forEach(k=>{ if (k.startsWith(rec.id + ":")) delete S.have[k]; });
+    } else {
+      const used = new Set(S.recipes.map(x=>x.color));
+      S.recipes.push(Object.assign(JSON.parse(JSON.stringify(rec)), { k: 1, color: COLORS.find(c=>!used.has(c)) || COLORS[S.recipes.length % COLORS.length] }));
+    }
+    /* Step numbers may have changed, so start the plan fresh. */
+    S.done = {}; S.idx = 0; S.startAt = null;
+    S.open = S.open || {}; S.open[rec.id] = true;
+    msg = `Saved ${name}${mi >= 0 ? " and updated it in this meal" : " and added it to this meal"}. Check the step times below.`;
+  } else msg = `Saved ${name} to your recipe box.`;
+  S.view = "setup";
+  try { localStorage.setItem(KEY, JSON.stringify(S)); } catch(e) { setSave("Couldn't save. Your browser storage may be full."); return; }
+  clearDraft();
+  try { sessionStorage.setItem("rgp-msg", msg); } catch(e) {}
+  location.href = "index.html";
+}
+$("saveMeal").onclick = ()=>save(true);
+$("saveBox").onclick = ()=>save(false);
+$("discard").onclick = ()=>{ clearDraft(); location.href = "index.html"; };
+
+/* ---------- start ---------- */
+(function init(){
+  if (editing) { $("title").textContent = "Edit recipe"; document.title = "Edit " + editing.name + " · Recipe Game Plan"; }
+  if (editId && !editing) $("notice").innerHTML = `<div class="notice">That recipe isn't in your recipe box anymore, so this is a new one.</div>`;
+  const inMeal = editing && S0.recipes.some(x=>x.id===editing.id);
+  if (inMeal) $("saveMeal").textContent = "Save and update meal";
+  let draft = null;
+  try { draft = JSON.parse(localStorage.getItem(DRAFT)); } catch(e) {}
+  if (draft && draft.editId === editId && draft.fields) {
+    F.forEach(k=>$(k).value = draft.fields[k] || "");
+    if (draft.basis) basis = draft.basis;
+    $("notice").innerHTML = `<div class="notice">Picked up your unsaved changes. <button class="linkbtn" type="button" id="startOver" style="padding:0">Start over</button></div>`;
+    $("startOver").onclick = ()=>{ clearDraft(); basis = editing ? JSON.parse(JSON.stringify(editing)) : null; fill(editing); $("notice").innerHTML = ""; preview(); };
+  } else fill(editing);
+  preview();
+})();
+</script>
+</body>
+</html>
