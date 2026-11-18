@@ -4,6 +4,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Recipe Game Plan</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#1E1C1A">
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Game Plan">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
@@ -136,6 +141,9 @@
   .rb .when2{color:var(--muted);font-size:14px;margin-top:6px;line-height:1.45}
   .warnline{color:#F0A99D;font-size:14px;margin-top:8px;line-height:1.45}
   .dayh{font:600 14px Oswald,sans-serif;letter-spacing:2px;text-transform:uppercase;color:var(--done);margin-bottom:6px}
+  #banner{position:fixed;left:12px;right:12px;top:12px;z-index:20;display:none}
+  #banner .bn{max-width:696px;margin:0 auto;background:var(--panel);border:2px solid var(--accent);border-radius:14px;padding:14px;font-size:15px;line-height:1.45;box-shadow:0 10px 30px rgba(0,0,0,.5)}
+  #banner b{color:var(--accent)}
   .modal{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none;align-items:center;justify-content:center;padding:24px;z-index:10}
   .modal.open{display:flex}
   .box{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:20px;max-width:360px;width:100%}
@@ -201,7 +209,7 @@ function addToMeal(lib, k){
   S.recipes.push(r); syncLib(r);
   return true;
 }
-function save(){ try { localStorage.setItem(KEY, JSON.stringify(S)); } catch(e) {} queuePush(); }
+function save(){ try { localStorage.setItem(KEY, JSON.stringify(S)); } catch(e) {} queuePush(); queueAlerts(); }
 
 
 /* ---------- batch scaling ---------- */
@@ -646,6 +654,7 @@ function renderSetup(){
   } else if (!S.library.length) {
     h += `<button class="linkbtn" type="button" data-act="sample">Try it with a sample recipe</button>`;
   }
+  h += alertsHtml();
   h += shareHtml();
   h += mealBackupHtml();
   h += boxHtml();
@@ -915,7 +924,7 @@ function applyRemote(j){
     if (d.quiet) S.quiet = d.quiet;
     S.approved = d.approved || {};
     S.share.rev = j.rev; lastShared = JSON.stringify(sharedData());
-    buildPlan(); changed = true;
+    buildPlan(); changed = true; queueAlerts();
   }
   const done = {}, have = {};
   Object.keys(j.checks || {}).forEach(k=>{ if (k.startsWith("have:")) have[k.slice(5)] = true; else done[k] = true; });
@@ -990,6 +999,127 @@ function shareHtml(){
   }
   if (shareMsg) h += `<div class="msg ok" style="word-break:break-all">${esc(shareMsg)}</div>`;
   return h + `</div>`;
+}
+
+
+/* ============================================================
+   Step alerts: a push notification on this phone when each block is due, even with the app closed.
+   The phone sends its upcoming alert times to /api/push; a cron Worker calls the send step every minute.
+   S.alerts = { on, device }. While the app is open without push, a chime and banner fill in.
+   ============================================================ */
+let alertTimer = null, alertsLast = "", alertMsg = "", alertErr = false, alertBusy = false;
+const pushOK = ()=>"serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
+function b64uToBytes(s){ s = s.replace(/-/g,"+").replace(/_/g,"/"); const raw = atob(s + "===".slice((s.length + 3) % 4)); return Uint8Array.from(raw, c=>c.charCodeAt(0)); }
+function blockWho(B){ return B.groups.map(g=>g.label).join(" + "); }
+function alertItems(){
+  const a = anchor(); if (!a) return [];
+  const now = Date.now();
+  return PLAN.blocks.filter(B=>!complete(B)).map(B=>{
+    const at = a + B.off*60000;
+    const first = B.groups[0] && B.groups[0].tasks[0] ? B.groups[0].tasks[0][1] : "";
+    const body = B.headline === blockWho(B) ? short(B.groups.map(g=>g.tasks[0] ? g.tasks[0][1] : "").filter(Boolean).join(" Also: "), 200) : B.headline;
+    return { at, title: fmt(at) + " · " + short(blockWho(B), 60), body: body || first, tag: "rgp-" + B.off };
+  }).filter(x=>x.at > now - 60000);
+}
+async function currentSub(){ const reg = await navigator.serviceWorker.ready; return reg.pushManager.getSubscription(); }
+function queueAlerts(){
+  if (!S.alerts || !S.alerts.on) return;
+  clearTimeout(alertTimer); alertTimer = setTimeout(syncAlerts, 1500);
+}
+async function syncAlerts(force){
+  if (!S.alerts || !S.alerts.on || !pushOK()) return;
+  const items = alertItems(), str = JSON.stringify(items);
+  if (str === alertsLast && !force) return;
+  try {
+    const sub = await currentSub();
+    if (!sub) throw new Error("This phone's alert subscription expired. Turn alerts off and on again.");
+    const res = await fetch("/api/push", { method:"POST", headers:{"content-type":"application/json"}, body: JSON.stringify({ device:S.alerts.device, sub, items }) });
+    const j = await res.json(); if (!res.ok) throw new Error(j.error);
+    alertsLast = str; alertErr = false; alertMsg = "";
+  } catch(e) { alertErr = true; alertMsg = e.message || "Couldn't update alerts. Will try again."; }
+}
+async function enableAlerts(){
+  if (!pushOK()) { alertErr = true; alertMsg = /iPhone|iPad/.test(navigator.userAgent) ? "On iPhone, add this app to your Home Screen first (Share, then Add to Home Screen), open it from there, and try again." : "This browser can't do push alerts. Keep the app open and it will chime instead."; render(); return; }
+  alertBusy = true; alertMsg = ""; render();
+  try {
+    const perm = await Notification.requestPermission();
+    if (perm !== "granted") throw new Error("Notifications are blocked for this site. Allow them in your browser's site settings, then try again.");
+    const reg = await navigator.serviceWorker.register("/sw.js");
+    await navigator.serviceWorker.ready;
+    const kr = await fetch("/api/push?key=1"); let kj = null; try { kj = await kr.json(); } catch(e) {}
+    if (!kj || !kj.publicKey) throw new Error(kj && kj.error ? kj.error : "Alerts only work on the hosted site (pages.dev).");
+    let sub = await reg.pushManager.getSubscription();
+    if (sub) { const cur = sub.options && sub.options.applicationServerKey; if (cur && btoa(String.fromCharCode(...new Uint8Array(cur))).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,"") !== kj.publicKey) { await sub.unsubscribe(); sub = null; } }
+    if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly:true, applicationServerKey:b64uToBytes(kj.publicKey) });
+    const dev = (S.alerts && S.alerts.device) || Array.from(crypto.getRandomValues(new Uint8Array(16)), b=>"abcdefghijkmnpqrstuvwxyz23456789"[b % 32]).join("");
+    S.alerts = { on:true, device:dev };
+    try { localStorage.setItem(KEY, JSON.stringify(S)); } catch(e) {}
+    alertsLast = ""; await syncAlerts(true);
+    if (!alertErr) alertMsg = "Alerts are on for this phone.";
+  } catch(e) { alertErr = true; alertMsg = e.message || String(e); }
+  alertBusy = false; render();
+}
+async function disableAlerts(){
+  const dev = S.alerts && S.alerts.device;
+  S.alerts = { on:false, device:dev }; save();
+  try { if (dev) await fetch("/api/push?device=" + dev, { method:"DELETE" }); const sub = pushOK() && await currentSub(); if (sub) await sub.unsubscribe(); } catch(e) {}
+  alertMsg = "Alerts are off for this phone."; alertErr = false; render();
+}
+async function testAlert(){
+  try {
+    const sub = await currentSub();
+    const res = await fetch("/api/push", { method:"POST", headers:{"content-type":"application/json"}, body: JSON.stringify({ device:S.alerts.device, sub, test:true }) });
+    if (!res.ok) throw new Error((await res.json()).error);
+    alertErr = false; alertMsg = "Test queued. It should arrive within a minute, even if you close the app.";
+  } catch(e) { alertErr = true; alertMsg = e.message || "Couldn't send a test."; }
+  render();
+}
+function alertsHtml(){
+  if (!S.recipes.length) return "";
+  const on = S.alerts && S.alerts.on;
+  const next = alertItems()[0];
+  let h = `<h2>Step alerts</h2><div class="card">`;
+  if (!on) h += `<div class="hint" style="margin-top:0">Get a notification on this phone when each step is due, even with the app closed. Everyone on a shared plan can turn on their own.</div>
+    <button class="btn go" type="button" data-act="alertsOn" style="width:100%;margin-top:10px" ${alertBusy?"disabled":""}>${alertBusy ? "Turning on" : "Turn on alerts"}</button>`;
+  else h += `<div class="hint" style="margin-top:0">${next ? `On for this phone. Next alert <b style="color:var(--accent)">${whenX(next.at)}</b>: ${esc(next.title.split(" · ").slice(1).join(" · "))}.` : anchor() ? "On for this phone. Nothing left to alert in this plan." : "On for this phone. Set an eat time or start the clock and alerts get scheduled."}</div>
+    <div class="row" style="margin-top:10px"><button class="btn" type="button" data-act="alertTest" style="flex:1">Send a test</button><button class="btn" type="button" data-act="alertsOff" style="flex:1">Turn off</button></div>`;
+  if (alertMsg) h += `<div class="msg ${alertErr ? "err" : "ok"}">${esc(alertMsg)}</div>`;
+  return h + `</div>`;
+}
+
+/* In-app fallback while the app is open and push alerts are off: chime, buzz and a banner. */
+let lastTick = Date.now(), banner = null;
+function chime(){
+  try {
+    const C = window.AudioContext || window.webkitAudioContext; if (!C) return;
+    const ctx = chime.ctx || (chime.ctx = new C()); const t = ctx.currentTime;
+    [0, .28, .56].forEach((d,i)=>{ const o = ctx.createOscillator(), g = ctx.createGain(); o.frequency.value = i===2 ? 1046 : 880; g.gain.setValueAtTime(0.0001, t+d); g.gain.exponentialRampToValueAtTime(0.3, t+d+.02); g.gain.exponentialRampToValueAtTime(0.0001, t+d+.24); o.connect(g).connect(ctx.destination); o.start(t+d); o.stop(t+d+.26); });
+  } catch(e) {}
+}
+function showBanner(B, i){
+  banner = { i, text: B.headline, who: blockWho(B) };
+  let el = document.getElementById("banner");
+  if (!el) { el = document.createElement("div"); el.id = "banner"; document.body.appendChild(el); }
+  el.innerHTML = `<div class="bn"><div><b>Time for the next step</b><br>${esc(short(banner.who, 60))}: ${esc(short(banner.text, 110))}</div><div class="row" style="margin-top:10px"><button class="btn sm go" type="button" data-act="bannerGo">Show me</button><button class="btn sm" type="button" data-act="bannerX">Dismiss</button></div></div>`;
+  el.style.display = "block";
+}
+function hideBanner(){ const el = document.getElementById("banner"); if (el) el.style.display = "none"; banner = null; }
+setInterval(()=>{
+  const now = Date.now(), prev = lastTick; lastTick = now;
+  if (S.alerts && S.alerts.on) return;
+  const a = anchor(); if (!a || document.hidden) return;
+  let hit = -1;
+  PLAN.blocks.forEach((B,i)=>{ const at = a + B.off*60000; if (at > prev && at <= now && !complete(B)) hit = i; });
+  if (hit < 0) return;
+  chime(); if (navigator.vibrate) navigator.vibrate([250,120,250,120,250]);
+  showBanner(PLAN.blocks[hit], hit);
+}, 15000);
+if ("serviceWorker" in navigator) navigator.serviceWorker.addEventListener("message", e=>{ if (e.data && e.data.type === "rgp-now") jumpNow(); });
+function jumpNow(){
+  const a = anchor(); if (!a) return;
+  const el = (Date.now() - a)/60000; let pick = 0;
+  PLAN.blocks.forEach((b,i)=>{ if (el >= b.off) pick = i; });
+  S.view = "cook"; go(pick);
 }
 
 /* ============================================================
@@ -1076,6 +1206,11 @@ document.addEventListener("click", e=>{
     else if (act==="copyList") { const txt = listText(); (navigator.clipboard ? navigator.clipboard.writeText(txt) : Promise.reject()).then(()=>{ copyMsg = "Copied. Paste it into a note or a text."; render(); }, ()=>{ copyMsg = "Couldn't copy here. Long-press to select the list instead."; render(); }); }
     else if (act==="clearHave") { Object.keys(S.have).forEach(k=>sendCheck("have:"+k, false)); S.have = {}; save(); render(); }
     else if (act==="share") startShare();
+    else if (act==="alertsOn") enableAlerts();
+    else if (act==="alertsOff") disableAlerts();
+    else if (act==="alertTest") testAlert();
+    else if (act==="bannerGo") { const i = banner ? banner.i : 0; hideBanner(); S.view = "cook"; buildPlan(); go(i); }
+    else if (act==="bannerX") hideBanner();
     else if (act==="qbAdd") { S.quiet.blocks = S.quiet.blocks || []; S.quiet.blocks.push({ days:"wkd", from:"10:00", to:"16:00", short:0 }); buildPlan(); save(); const y = window.scrollY; render(); window.scrollTo(0,y); }
     else if (act==="qbDel") { (S.quiet.blocks || []).splice(+t.dataset.i, 1); buildPlan(); save(); const y = window.scrollY; render(); window.scrollTo(0,y); }
     else if (act==="rbPick" && r) { S.rbOpen = r.id; render(); const f = main.querySelector(`[data-rb="${r.id}"]`); if (f) { f.focus(); if (f.showPicker) try { f.showPicker(); } catch(e) {} } }
@@ -1202,6 +1337,8 @@ if (S.share) {
   try { if (sessionStorage.getItem("rgp-push")) { sessionStorage.removeItem("rgp-push"); lastShared = ""; resetChecks = true; queuePush(); } } catch(e) {}
   startPolling();
 }
+if (S.alerts && S.alerts.on && pushOK()) { navigator.serviceWorker.register("/sw.js").catch(()=>{}); queueAlerts(); }
+if (new URLSearchParams(location.search).get("now")) { history.replaceState(null, "", location.pathname); jumpNow(); }
 (function(){
   const id = new URLSearchParams(location.search).get("plan");
   if (!id) return;
