@@ -311,6 +311,7 @@ function save(addToMeal){
   try { localStorage.setItem(KEY, JSON.stringify(S)); } catch(e) { setSave("Couldn't save. Your browser storage may be full."); return; }
   clearDraft();
   try { sessionStorage.setItem("rgp-msg", msg); } catch(e) {}
+  if (S.share && (mi >= 0 || addToMeal)) { try { sessionStorage.setItem("rgp-push", "1"); } catch(e) {} }
   location.href = "index.html";
 }
 $("saveMeal").onclick = ()=>save(true);

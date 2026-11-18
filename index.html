@@ -193,7 +193,7 @@ function addToMeal(lib, k){
   S.recipes.push(r); syncLib(r);
   return true;
 }
-function save(){ try { localStorage.setItem(KEY, JSON.stringify(S)); } catch(e) {} }
+function save(){ try { localStorage.setItem(KEY, JSON.stringify(S)); } catch(e) {} queuePush(); }
 
 
 /* ---------- batch scaling ---------- */
@@ -590,6 +590,7 @@ function renderSetup(){
   } else if (!S.library.length) {
     h += `<button class="linkbtn" type="button" data-act="sample">Try it with a sample recipe</button>`;
   }
+  h += shareHtml();
   h += boxHtml();
   main.innerHTML = h;
 }
@@ -716,6 +717,133 @@ document.getElementById("mCancel").onclick = ()=>modal.classList.remove("open");
 document.getElementById("mOk").onclick = ()=>{ const f = modalOk; modal.classList.remove("open"); if (f) f(); };
 document.addEventListener("keydown", e=>{ if (e.key==="Escape") modal.classList.remove("open"); });
 
+
+/* ============================================================
+   Sharing: the plan lives in D1, every device polls every few seconds.
+   S.share = { id, rev }. Recipes, eat time, clock, quiet hours and approvals are shared.
+   Each checkbox is sent on its own, so two people never overwrite each other.
+   ============================================================ */
+const POLL_MS = 4000;
+let resetChecks = false, pushTimer = null, pushing = false, lastShared = "", syncErr = "", lastSync = 0, pollTimer = null, polling = false;
+const pending = {};  /* checkbox taps not yet confirmed by a poll */
+function sharedData(){ return { recipes:S.recipes, target:S.target, startAt:S.startAt, quiet:S.quiet, approved:S.approved }; }
+function shareLink(){ return location.origin + location.pathname.replace(/index\.html$/,"") + "?plan=" + S.share.id; }
+function queuePush(){
+  if (!S.share) return;
+  const now = JSON.stringify(sharedData());
+  if (now === lastShared && !resetChecks) return;
+  clearTimeout(pushTimer); pushTimer = setTimeout(pushNow, 500);
+}
+async function pushNow(){
+  pushTimer = null;
+  if (!S.share || pushing) { if (S.share) pushTimer = setTimeout(pushNow, 500); return; }
+  const data = sharedData(), str = JSON.stringify(data), reset = resetChecks;
+  pushing = true; resetChecks = false;
+  try {
+    const res = await fetch("/api/plan?id=" + S.share.id, { method:"PUT", headers:{"content-type":"application/json"}, body: JSON.stringify({ data, reset }) });
+    const j = await res.json();
+    if (!res.ok) throw new Error(j.error || "Couldn't sync.");
+    S.share.rev = j.rev; lastShared = str; syncErr = ""; lastSync = Date.now();
+    try { localStorage.setItem(KEY, JSON.stringify(S)); } catch(e) {}
+  } catch(e) { syncErr = e.message || "Couldn't sync. Will keep trying."; if (reset) resetChecks = true; }
+  pushing = false;
+  if (S.share && (JSON.stringify(sharedData()) !== lastShared || resetChecks)) queuePush();
+}
+function sendCheck(task, on){
+  if (!S.share) return;
+  pending[task] = { on, until: Date.now() + 15000 };
+  fetch("/api/plan?id=" + S.share.id, { method:"POST", headers:{"content-type":"application/json"}, body: JSON.stringify({ task, on }) })
+    .then(r=>{ if (!r.ok) throw 0; pending[task].until = Date.now() + POLL_MS*2; }, ()=>{})
+    .catch(()=>{ syncErr = "A checkbox didn't sync. Check your connection."; });
+}
+function busyTyping(){ const a = document.activeElement; return a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName) && a.type !== "checkbox" && main.contains(a); }
+function applyRemote(j){
+  let changed = false;
+  if (j.rev > (S.share.rev || 0) && !pushing && !pushTimer) {
+    const d = j.data || {};
+    S.recipes = Array.isArray(d.recipes) ? d.recipes : [];
+    S.recipes.forEach(r=>{ if (!r.k) r.k = 1; if (!r.over) r.over = {}; if (!S.library.some(x=>x.id===r.id)) S.library.push(libCopy(r)); });
+    S.target = d.target || null; S.startAt = d.startAt || null;
+    if (d.quiet) S.quiet = d.quiet;
+    S.approved = d.approved || {};
+    S.share.rev = j.rev; lastShared = JSON.stringify(sharedData());
+    buildPlan(); changed = true;
+  }
+  const done = {}, have = {};
+  Object.keys(j.checks || {}).forEach(k=>{ if (k.startsWith("have:")) have[k.slice(5)] = true; else done[k] = true; });
+  const now = Date.now();
+  Object.keys(pending).forEach(k=>{
+    if (pending[k].until < now) { delete pending[k]; return; }
+    const tgt = k.startsWith("have:") ? have : done, kk = k.startsWith("have:") ? k.slice(5) : k;
+    if (pending[k].on) tgt[kk] = true; else delete tgt[kk];
+  });
+  if (JSON.stringify(done) !== JSON.stringify(S.done) || JSON.stringify(have) !== JSON.stringify(S.have)) { S.done = done; S.have = have; changed = true; }
+  syncErr = ""; lastSync = now;
+  if (changed) { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch(e) {} }
+  return changed;
+}
+async function poll(){
+  if (!S.share || polling || document.hidden) return;
+  polling = true;
+  try {
+    const res = await fetch("/api/plan?id=" + S.share.id, { cache:"no-store" });
+    const j = await res.json();
+    if (res.status === 404) { syncErr = j.error; }
+    else if (!res.ok) throw new Error(j.error);
+    else if (applyRemote(j) && !busyTyping()) { const y = window.scrollY; render(); window.scrollTo(0,y); }
+  } catch(e) { syncErr = (e && e.message) || "Can't reach the shared plan. Will keep trying."; }
+  polling = false;
+}
+function startPolling(){ clearInterval(pollTimer); if (S.share) { pollTimer = setInterval(poll, POLL_MS); poll(); } }
+document.addEventListener("visibilitychange", ()=>{ if (!document.hidden) poll(); });
+async function startShare(){
+  const checks = {};
+  Object.keys(S.done).forEach(k=>{ if (S.done[k]) checks[k] = true; });
+  Object.keys(S.have).forEach(k=>{ if (S.have[k]) checks["have:"+k] = true; });
+  shareMsg = "Creating the link"; render();
+  try {
+    const res = await fetch("/api/plan", { method:"POST", headers:{"content-type":"application/json"}, body: JSON.stringify({ data: sharedData(), checks }) });
+    let j = null; try { j = await res.json(); } catch(e) {}
+    if (!j) throw new Error("Sharing only works on the hosted site (pages.dev).");
+    if (!res.ok) throw new Error(j.error);
+    S.share = { id:j.id, rev:j.rev }; lastShared = JSON.stringify(sharedData()); save();
+    shareMsg = ""; startPolling(); render(); sendLink();
+  } catch(e) { shareMsg = e.message || String(e); render(); }
+}
+function sendLink(){
+  const url = shareLink();
+  if (navigator.share) navigator.share({ title:"Game plan", text:"Cook with me: " + S.recipes.map(r=>r.name).join(" + "), url }).catch(()=>{});
+  else if (navigator.clipboard) navigator.clipboard.writeText(url).then(()=>{ shareMsg = "Link copied."; render(); }, ()=>{ shareMsg = url; render(); });
+  else { shareMsg = url; render(); }
+}
+async function joinShare(id){
+  try {
+    const res = await fetch("/api/plan?id=" + encodeURIComponent(id), { cache:"no-store" });
+    let j = null; try { j = await res.json(); } catch(e) {}
+    if (!j) throw new Error("Sharing only works on the hosted site (pages.dev).");
+    if (!res.ok) throw new Error(j.error);
+    S.share = { id, rev:0 }; S.idx = 0; S.view = "setup";
+    applyRemote(j);
+    importMsg = "Joined the shared plan. Checkboxes and changes sync both ways."; importErr = false;
+    save(); startPolling();
+  } catch(e) { importMsg = e.message || String(e); importErr = true; }
+  render();
+}
+let shareMsg = "";
+function shareHtml(){
+  if (!S.recipes.length) return "";
+  let h = `<h2>Share</h2><div class="card">`;
+  if (!S.share) h += `<div class="hint" style="margin-top:0">Send a link so someone else can cook from this plan with you. Checkboxes, times and changes stay in sync on both phones.</div>
+    <button class="btn go" type="button" data-act="share" style="width:100%;margin-top:10px">Share this plan</button>`;
+  else {
+    const ago = lastSync ? Math.round((Date.now() - lastSync)/1000) : null;
+    h += `<div class="hint" style="margin-top:0">${syncErr ? `<span style="color:var(--warn)">${esc(syncErr)}</span>` : `Shared. Changes sync every few seconds${ago!=null ? ` (last sync ${ago < 5 ? "just now" : ago + "s ago"})` : ""}.`}</div>
+      <div class="row" style="margin-top:10px"><button class="btn go" type="button" data-act="sendLink" style="flex:1">Send link</button><button class="btn" type="button" data-act="leaveShare" style="flex:1">Stop sharing here</button></div>`;
+  }
+  if (shareMsg) h += `<div class="msg ok" style="word-break:break-all">${esc(shareMsg)}</div>`;
+  return h + `</div>`;
+}
+
 /* ============================================================
    Actions
    ============================================================ */
@@ -745,7 +873,7 @@ async function importUrl(u){
   }
   busy = false; render();
 }
-function afterChange(){ buildPlan(); S.done = {}; S.idx = 0; S.startAt = null; save(); }
+function afterChange(){ buildPlan(); S.done = {}; S.idx = 0; S.startAt = null; resetChecks = true; save(); }
 
 const SAMPLE = `Pat's Beef and Pork Chili
 Ingredients
@@ -798,7 +926,10 @@ document.addEventListener("click", e=>{
     else if (act==="batch" && r) { r.k = +t.dataset.k; syncLib(r); buildPlan(); save(); const y = window.scrollY; render(); window.scrollTo(0,y); }
     else if (act==="list") { S.view = "list"; copyMsg = ""; save(); render(); window.scrollTo(0,0); }
     else if (act==="copyList") { const txt = listText(); (navigator.clipboard ? navigator.clipboard.writeText(txt) : Promise.reject()).then(()=>{ copyMsg = "Copied. Paste it into a note or a text."; render(); }, ()=>{ copyMsg = "Couldn't copy here. Long-press to select the list instead."; render(); }); }
-    else if (act==="clearHave") { S.have = {}; save(); render(); }
+    else if (act==="clearHave") { Object.keys(S.have).forEach(k=>sendCheck("have:"+k, false)); S.have = {}; save(); render(); }
+    else if (act==="share") startShare();
+    else if (act==="sendLink") sendLink();
+    else if (act==="leaveShare") ask("Stop syncing this plan on this phone? It stays here as your own copy, and the other people keep theirs.", "Stop sharing", ()=>{ S.share = null; clearInterval(pollTimer); shareMsg = ""; save(); render(); });
     else if (act==="addLib") { const L = S.library.find(x=>x.id===id); if (L && addToMeal(L, 1)) { afterChange(); importMsg = `Added ${L.name} from your recipe box.`; importErr = false; render(); } }
     else if (act==="delLib") { const L = S.library.find(x=>x.id===id); if (L) ask(`Delete <b>${esc(L.name)}</b> from your recipe box?${S.recipes.some(x=>x.id===id) ? " It stays in this meal until you remove it." : ""}`, "Delete", ()=>{ S.library = S.library.filter(x=>x.id!==id); save(); render(); }); }
     else if (act==="toggleBackup") { backupOpen = !backupOpen; backupMsg = ""; render(); }
@@ -825,7 +956,7 @@ document.addEventListener("click", e=>{
       go(pick);
     }
     else if (act==="ready") ask(`<label for="rt" style="display:block;margin-bottom:8px;color:var(--muted)">Eat at</label><input class="field" type="datetime-local" id="rt" step="300" style="color-scheme:dark;font-size:18px" value="${S.target ? dtLocal(S.target) : ""}">`, "Set", ()=>{ setReady(document.getElementById("rt").value); });
-    else if (act==="reset") ask("Clear every checkbox and stop the clock? Your recipes and ready time stay.", "Reset", ()=>{ S.done = {}; S.startAt = null; S.idx = 0; save(); render(); });
+    else if (act==="reset") ask("Clear every checkbox and stop the clock? Your recipes and ready time stay.", "Reset", ()=>{ S.done = {}; S.startAt = null; S.idx = 0; resetChecks = true; save(); render(); });
     return;
   }
   const tab = e.target.closest(".tl"); if (tab) go(+tab.dataset.i);
@@ -842,10 +973,12 @@ document.addEventListener("change", e=>{
   const el = e.target;
   if (el.matches("input[data-id]")) {
     if (el.checked) S.done[el.dataset.id] = true; else delete S.done[el.dataset.id];
+    sendCheck(el.dataset.id, el.checked);
     save(); const y = window.scrollY; render(); window.scrollTo(0,y); return;
   }
   if (el.matches("input[data-have]")) {
     if (el.checked) S.have[el.dataset.have] = true; else delete S.have[el.dataset.have];
+    sendCheck("have:" + el.dataset.have, el.checked);
     save(); const y = window.scrollY; render(); window.scrollTo(0,y); return;
   }
   if (el.id === "readyIn") { if (el.value) setReady(el.value); return; }
@@ -882,6 +1015,20 @@ document.getElementById("next").onclick = ()=>go(S.idx+1);
 
 buildPlan();
 render();
+if (S.share) {
+  lastShared = JSON.stringify(sharedData());
+  /* The recipe builder changed the meal: send it, and clear the cook checkboxes everywhere. */
+  try { if (sessionStorage.getItem("rgp-push")) { sessionStorage.removeItem("rgp-push"); lastShared = ""; resetChecks = true; queuePush(); } } catch(e) {}
+  startPolling();
+}
+(function(){
+  const id = new URLSearchParams(location.search).get("plan");
+  if (!id) return;
+  history.replaceState(null, "", location.pathname);
+  if (S.share && S.share.id === id) return;
+  if (S.recipes.length) ask("Open the shared plan? It replaces the meal on this phone. Your recipe box stays.", "Open it", ()=>joinShare(id));
+  else joinShare(id);
+})();
 </script>
 </body>
 </html>
