@@ -485,7 +485,8 @@ function fmt(ms, withDay){
 function rel(off){ const h=Math.floor(off/60), m=off%60; return "+" + h + ":" + String(m).padStart(2,"0"); }
 function wday(ms){ return new Date(ms).toLocaleDateString([], {weekday:"short"}); }
 function label(B){ const a = anchor(); if (!a) return rel(B.off); const ms = a + B.off*60000; return PLAN.multiDay ? wday(ms) + " " + fmt(ms) : fmt(ms); }
-function whenX(x){ return S.target ? wday(S.target + x*60000) + " " + fmt(S.target + x*60000) : rel(Math.round(x - PLAN.start)); }
+function wdate(ms){ return new Date(ms).toLocaleDateString([], {weekday:"short", month:"short", day:"numeric"}); }
+function whenX(x){ return S.target ? wdate(S.target + x*60000) + ", " + fmt(S.target + x*60000) : rel(Math.round(x - PLAN.start)); }
 function dtLocal(ms){ const d = new Date(ms), z = n=>String(n).padStart(2,"0"); return d.getFullYear()+"-"+z(d.getMonth()+1)+"-"+z(d.getDate())+"T"+z(d.getHours())+":"+z(d.getMinutes()); }
 
 /* ============================================================
@@ -572,7 +573,7 @@ function renderSetup(){
     <div class="card">
       <div class="readyrow"><input type="datetime-local" id="readyIn" step="300" value="${S.target ? dtLocal(S.target) : ""}" aria-label="Eat date and time">
       ${S.target ? `<button class="btn" type="button" data-act="clearReady">Clear</button>` : ""}</div>
-      <div class="hint">${S.target ? `Start at <b style="color:var(--accent)">${wday(S.target - PLAN.total*60000)} ${fmt(S.target - PLAN.total*60000)}</b> to eat ${wday(S.target)} ${fmt(S.target)}. Total plan: ${fmtDur(PLAN.total)}.` : `Optional. Set it and every step gets a day and clock time. Total plan: ${fmtDur(PLAN.total)}.`}</div>
+      <div class="hint">${S.target ? `Start at <b style="color:var(--accent)">${wdate(S.target - PLAN.total*60000)}, ${fmt(S.target - PLAN.total*60000)}</b> to eat ${wdate(S.target)}, ${fmt(S.target)}. Total plan: ${fmtDur(PLAN.total)}.` : `Optional. Set it and every step gets a day and clock time. Total plan: ${fmtDur(PLAN.total)}.`}</div>
       <label class="qrow"><input type="checkbox" id="qOn" ${S.quiet.on?"checked":""}> Quiet hours</label>
       ${S.quiet.on ? `<div class="row qtimes"><input type="time" id="qFrom" step="900" value="${S.quiet.from}" aria-label="Quiet hours start"><span>to</span><input type="time" id="qTo" step="900" value="${S.quiet.to}" aria-label="Quiet hours end"></div>
       <div class="hint">No hands-on steps in this window. Brines, marinades and other flexible waits stretch to make room.${S.target ? "" : " Applies once you set an eat time."}</div>` : ""}
