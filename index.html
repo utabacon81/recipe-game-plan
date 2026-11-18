@@ -661,7 +661,7 @@ function quietBlocksHtml(){
       <div class="row"><select class="sel" data-qb="${i}" data-f="days" aria-label="Days">${QDAYS.map(([k,l])=>`<option value="${k}" ${bk.days===k?"selected":""}>${l}</option>`).join("")}</select>
         <button class="btn sm del" type="button" data-act="qbDel" data-i="${i}" aria-label="Remove this quiet time">✕</button></div>
       <div class="row qtimes"><input type="time" step="900" data-qb="${i}" data-f="from" value="${bk.from}" aria-label="From"><span>to</span><input type="time" step="900" data-qb="${i}" data-f="to" value="${bk.to}" aria-label="To"></div>
-      <select class="sel" data-qb="${i}" data-f="short" aria-label="Short tasks" style="margin-top:8px">${[[0,"No hands-on work"],[15,"Tasks up to 15 min are OK"],[30,"Tasks up to 30 min are OK"],[60,"Tasks up to 1 hr are OK"]].map(([v,l])=>`<option value="${v}" ${(+bk.short||0)===v?"selected":""}>${l}</option>`).join("")}</select>
+      <select class="sel" data-qb="${i}" data-f="short" aria-label="Short tasks" style="margin-top:8px">${[[0,"Unavailable, no tasks"],[15,"Allow short tasks, up to 15 min"],[30,"Allow short tasks, up to 30 min"],[60,"Allow short tasks, up to 1 hr"]].map(([v,l])=>`<option value="${v}" ${(+bk.short||0)===v?"selected":""}>${l}</option>`).join("")}</select>
     </div>`;
   });
   h += `<button class="btn sm" type="button" data-act="qbAdd" style="margin-top:10px">Add a quiet time</button>`;
