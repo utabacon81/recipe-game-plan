@@ -101,6 +101,25 @@
   .readyrow{display:flex;gap:10px;align-items:center}
   .readyrow input{flex:1;min-height:52px;border-radius:12px;border:1px solid var(--line);background:var(--bg);color:var(--text);font:600 20px Inter,sans-serif;padding:0 14px;color-scheme:dark}
   .hint{color:var(--muted);font-size:14px;line-height:1.45;margin-top:8px}
+  .batch{display:flex;gap:6px;margin-top:12px;flex-wrap:wrap}
+  .batch button{min-width:52px;min-height:40px;border-radius:10px;border:1px solid var(--line);background:none;color:var(--text);font:600 15px Oswald,sans-serif;letter-spacing:.5px;cursor:pointer;padding:0 10px}
+  .batch button.on{background:var(--accent);border-color:var(--accent);color:#1E1C1A}
+  .bx{display:flex;gap:10px;align-items:center;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px 12px;margin-bottom:8px}
+  .bxm{flex:1;min-width:0}
+  .bxn{font-size:16px;font-weight:600;line-height:1.3}
+  .bx .meta{color:var(--muted);font-size:13px;margin-top:2px}
+  .inmeal{font-size:13px;color:var(--done);font-weight:600;padding:0 6px}
+  .ilist .top2{display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap}
+  .ilist .title{font:700 34px Oswald,sans-serif;color:var(--accent);line-height:1.1}
+  .ilist .meta{color:var(--muted);font-size:15px}
+  .ilist h2{margin:26px 0 0}
+  .ilist .batch{margin:10px 0}
+  .irow{display:flex;gap:12px;align-items:center;padding:9px 0;cursor:pointer}
+  .irow input{appearance:none;-webkit-appearance:none;flex:0 0 24px;width:24px;height:24px;margin:0;border:2px solid var(--muted);border-radius:6px;display:grid;place-content:center;cursor:pointer}
+  .irow input:checked{background:var(--done);border-color:var(--done)}
+  .irow input:checked::after{content:"";width:10px;height:6px;border-left:3px solid #1E1C1A;border-bottom:3px solid #1E1C1A;transform:translateY(-2px) rotate(-45deg)}
+  .irow .nm{flex:1;font-size:16px;line-height:1.35}
+  .irow.have .nm{opacity:.45;text-decoration:line-through}
   .modal{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none;align-items:center;justify-content:center;padding:24px;z-index:10}
   .modal.open{display:flex}
   .box{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:20px;max-width:360px;width:100%}
@@ -141,8 +160,29 @@
    Storage
    ============================================================ */
 const KEY = "recipe-game-plan-v1";
-let S = { view:"setup", recipes:[], target:null, startAt:null, idx:0, done:{}, open:{} };
+let S = { view:"setup", recipes:[], library:[], target:null, startAt:null, idx:0, done:{}, open:{}, have:{} };
 try { const s = JSON.parse(localStorage.getItem(KEY)); if (s && Array.isArray(s.recipes)) S = Object.assign(S, s); } catch(e) {}
+if (!Array.isArray(S.library)) S.library = [];
+if (!S.have) S.have = {};
+S.recipes.forEach(r=>{ if (!r.k) r.k = 1; if (!S.library.some(x=>x.id===r.id)) S.library.push(libCopy(r)); });
+const BATCHES = [0.5, 1, 1.5, 2, 3];
+
+/* The recipe box keeps a master copy of every recipe. The meal holds working copies with a batch size. */
+function libCopy(r){ const c = JSON.parse(JSON.stringify(r)); delete c.k; delete c.color; c.saved = c.saved || Date.now(); return c; }
+function syncLib(r){
+  const i = S.library.findIndex(x=>x.id===r.id);
+  const c = libCopy(r); c.used = Date.now();
+  if (i >= 0) { c.saved = S.library[i].saved; S.library[i] = c; } else S.library.unshift(c);
+}
+function addToMeal(lib, k){
+  if (S.recipes.some(x=>x.id===lib.id)) return false;
+  const used = new Set(S.recipes.map(x=>x.color));
+  const r = JSON.parse(JSON.stringify(lib));
+  r.k = k || 1;
+  r.color = COLORS.find(c=>!used.has(c)) || COLORS[S.recipes.length % COLORS.length];
+  S.recipes.push(r); syncLib(r);
+  return true;
+}
 function save(){ try { localStorage.setItem(KEY, JSON.stringify(S)); } catch(e) {} }
 
 const COLORS = ["#E06C5A","#E5B94E","#7FB57A","#9DB4D6","#C98B5A","#C792EA","#5FC4C4","#F29BB3"];
@@ -268,7 +308,7 @@ function flatSteps(ri){
   add(ri);
   return out;
 }
-function buildRecipe({name, url, ingredients, steps}){
+function buildRecipe({name, url, ingredients, steps, yld}){
   const st = steps.map(text=>({ sents: sentences(text).map(t=>{
     const pre = /\bpre-?heat\b/i.test(t);
     const d = durMin(t);
@@ -278,7 +318,7 @@ function buildRecipe({name, url, ingredients, steps}){
     id: "r" + Date.now().toString(36) + Math.random().toString(36).slice(2,6),
     name: (name || "Untitled recipe").trim(),
     url: url || "",
-    color: COLORS[S.recipes.length % COLORS.length],
+    yld: yld || "",
     ings: ingredients.map(i=>decode(i)).filter(i=>i && !/:\s*$/.test(i)),
     steps: st,
     over: {}, prepOver: null
@@ -286,18 +326,21 @@ function buildRecipe({name, url, ingredients, steps}){
 }
 function fromJsonLd(r, url){
   const ings = (Array.isArray(r.recipeIngredient) ? r.recipeIngredient : [r.recipeIngredient]).filter(Boolean);
-  return buildRecipe({ name: decode(r.name), url, ingredients: ings, steps: flatSteps(r.recipeInstructions) });
+  const y = Array.isArray(r.recipeYield) ? r.recipeYield.find(v=>/\d/.test(String(v))) || r.recipeYield[0] : r.recipeYield;
+  return buildRecipe({ name: decode(r.name), url, ingredients: ings, steps: flatSteps(r.recipeInstructions), yld: y ? decode(String(y)) : "" });
 }
-function fromText(text){
+function fromText(text, fallbackName){
   const lines = text.split(/\r?\n/).map(l=>l.trim());
   let mode = null, title = "", ings = [], steps = [];
   const isIngHead = l=>/^(ingredients?)\s*:?$/i.test(l);
   const isStepHead = l=>/^(instructions?|directions?|method|preparation|steps|how to make( it)?)\s*:?$/i.test(l);
+  const isStopHead = l=>/^(notes?|cook'?s notes?|nutrition( facts| info(rmation)?)?|reviews?|comments?|related( recipes)?|you might also like|more recipes|tips|faqs?|storage)\s*:?$/i.test(l);
   const hasHeads = lines.some(isIngHead) && lines.some(isStepHead);
   for (const l of lines) {
     if (!l) continue;
     if (isIngHead(l)) { mode = "i"; continue; }
     if (isStepHead(l)) { mode = "s"; continue; }
+    if (hasHeads && isStopHead(l) && mode === "s" && steps.length) { mode = null; continue; }
     const clean = l.replace(/^[-•*▢☐□]\s*/,"");
     if (!hasHeads) {
       if (!title && !/^\d/.test(clean)) { title = clean; continue; }
@@ -309,13 +352,75 @@ function fromText(text){
     else if (mode === "s") steps.push(clean.replace(/^(step\s*)?\d+[.):]\s*/i,""));
     else if (!title) title = clean;
   }
-  return buildRecipe({ name: title, ingredients: ings, steps: steps.filter(s=>s.length > 3) });
+  return buildRecipe({ name: title || fallbackName, ingredients: ings, steps: steps.filter(s=>s.length > 3) });
 }
 
+/* ---------- batch scaling ---------- */
+const FRACS = [[0,""],[1/8,"1/8"],[1/4,"1/4"],[1/3,"1/3"],[3/8,"3/8"],[1/2,"1/2"],[5/8,"5/8"],[2/3,"2/3"],[3/4,"3/4"],[7/8,"7/8"],[1,""]];
+function qtyStr(v){
+  if (v >= 10) return String(Math.round(v));
+  let w = Math.floor(v), f = v - w, best = FRACS[0];
+  FRACS.forEach(x=>{ if (Math.abs(x[0]-f) < Math.abs(best[0]-f)) best = x; });
+  if (best[0] === 1) { w += 1; best = FRACS[0]; }
+  if (!w && !best[1]) return String(+v.toFixed(2));
+  return w ? (best[1] ? w + " " + best[1] : String(w)) : best[1];
+}
+const NUM = "(\\d+\\s+\\d+\\s*\\/\\s*\\d+|\\d+\\s*\\/\\s*\\d+|\\d*\\.\\d+|\\d+\\s?[½⅓⅔¼¾⅛⅜⅝⅞]|[½⅓⅔¼¾⅛⅜⅝⅞]|\\d+)";
+function numVal(t){ return +normNum(t).split(" ").reduce((a,x)=>a + +x, 0); }
+/* Convert up when a scaled spoon measure gets big. */
+function upUnit(v, unit){
+  const u = unit.toLowerCase();
+  if (/^(tsp|teaspoons?)$/.test(u) && v >= 3 && Math.abs(v/3*4 - Math.round(v/3*4)) < .05) return upUnit(v/3, "tbsp");
+  if (/^(tbsp|tablespoons?)$/.test(u) && v >= 4 && Math.abs(v/4 - Math.round(v/4*4)/4) < .01) return [v/16, v/16 > 1 ? "cups" : "cup"];
+  return [v, unit];
+}
+const LEAD_QTY = new RegExp("^(about\\s+|approximately\\s+)?" + NUM + "(\\s*(?:-|–|to)\\s*" + NUM + ")?(\\s+)([a-zA-Z.]+)?", "i");
+const PLURAL = { cup:"cups", tablespoon:"tablespoons", teaspoon:"teaspoons", pound:"pounds", ounce:"ounces", clove:"cloves", can:"cans", stick:"sticks", quart:"quarts", pint:"pints", liter:"liters", gram:"grams" };
+function unitFor(unit, v){
+  if (!unit) return unit;
+  const low = unit.toLowerCase();
+  const sing = Object.keys(PLURAL).find(k=>k===low || PLURAL[k]===low);
+  if (!sing) return unit;
+  const out = v > 1.001 ? PLURAL[sing] : sing;
+  return unit[0] === unit[0].toUpperCase() ? out[0].toUpperCase() + out.slice(1) : out;
+}
+function scaleLine(raw, k){
+  if (k === 1) return raw;
+  const m = raw.match(LEAD_QTY);
+  if (!m) return raw;
+  const lo = numVal(m[2]) * k, hi = m[4] ? numVal(m[4]) * k : null;
+  let unit = m[6] || "", rest = raw.slice(m[0].length);
+  let [v, u] = upUnit(lo, unit);
+  let out = qtyStr(v);
+  if (hi != null) { const [v2] = upUnit(hi, unit); out += " to " + qtyStr(v2); }
+  if (unit && u !== unit) unit = u;
+  unit = unitFor(unit, hi != null ? Math.max(v, upUnit(hi, unit)[0]) : v);
+  return (m[1] || "") + out + (m[5] || " ") + unit + rest;
+}
+const TEXT_QTY = new RegExp("\\b" + NUM + "(\\s*(?:-|to)\\s*" + NUM + ")?\\s+(cups?|tablespoons?|tbsp|teaspoons?|tsp|ounces?|oz|pounds?|lbs?|grams?|g|kilograms?|kg|ml|milliliters?|liters?|quarts?|pints?|cloves?|cans?|sticks?)\\b(?!\\s*°)", "gi");
+function scaleText(t, k){
+  if (k === 1) return t;
+  return t.replace(TEXT_QTY, (all, a, range, b, unit)=>{
+    let out = qtyStr(numVal(a)*k);
+    if (range) out += " to " + qtyStr(numVal(b)*k);
+    return out + " " + unitFor(unit, numVal(range ? b : a)*k);
+  });
+}
+function servings(r){
+  const m = String(r.yld||"").match(/(\d+)(?:\s*(?:-|to)\s*(\d+))?/);
+  if (!m) return "";
+  const k = r.k || 1, a = Math.round(+m[1]*k), b = m[2] ? Math.round(+m[2]*k) : null;
+  return "Serves " + a + (b ? " to " + b : "");
+}
+/* Bigger batches: hands-on work and prep take longer, timed waits (simmer, bake) don't. */
+function activeFactor(k){ return 1 + 0.5*Math.max(0, k-1); }
+
 /* ---------- per-recipe timeline ---------- */
-function stepMin(r, i){ const o = r.over[i]; return (o!=null && o!=="") ? +o : r.steps[i].sents.reduce((a,s)=>a+s.m,0); }
+function autoStepMin(r, i){ const k = r.k || 1; return Math.round(r.steps[i].sents.reduce((a,s)=>a + (s.timed ? s.m : s.m*activeFactor(k)), 0)); }
+function stepMin(r, i){ const o = r.over[i]; return (o!=null && o!=="") ? +o : autoStepMin(r, i); }
 function prepItems(r){ return r.ings.map(parseIng).map((p,i)=>({...p, i})).filter(p=>p.prep); }
-function prepMin(r){ if (r.prepOver!=null && r.prepOver!=="") return +r.prepOver; const n = prepItems(r).length; return n ? Math.max(5, n*3) : 0; }
+function autoPrepMin(r){ const n = prepItems(r).length; return n ? Math.round(Math.max(5, n*3) * (1 + 0.6*Math.max(0, (r.k||1)-1))) : 0; }
+function prepMin(r){ if (r.prepOver!=null && r.prepOver!=="") return +r.prepOver; return autoPrepMin(r); }
 
 function matchIngredients(r){
   const parsed = r.ings.map(parseIng);
@@ -351,7 +456,7 @@ function recipePlan(r){
   const pm = prepMin(r);
   const pitems = prepItems(r);
   const prep = pitems.length ? { dur:pm,
-      ings: pitems.map(p=>({raw:p.raw, prepped:false})),
+      ings: pitems.map(p=>({raw:scaleLine(p.raw, r.k||1), prepped:false})),
       tasks: pitems.map(p=>[r.id+":p:"+p.i, (/\b(for garnish|for serving|to serve|toppings?)\b/i.test(p.raw) ? "Garnishes" : cap(p.name))+": "+p.prep, ""]).concat([[r.id+":p:gather","Measure out everything else for this recipe",""]]) } : null;
   const preheats = [];
   const firstSeen = {};
@@ -369,10 +474,10 @@ function recipePlan(r){
       if (!hits[ii].includes(si)) return;
       const again = firstSeen[ii]!==undefined;
       if (!again) firstSeen[ii] = si;
-      ings.push({ raw: again ? p.name : p.raw, prepped: !again && !!p.prep, again });
+      ings.push({ raw: again ? p.name : scaleLine(p.raw, r.k||1), prepped: !again && !!p.prep, again });
     });
     blocks.push({ off, dur, kind:"step", si, ings,
-      tasks: real.map((s,ti)=>[r.id+":"+si+":"+ti, s.t, s.timed ? "About "+fmtDur(s.m) : ""]) });
+      tasks: real.map((s,ti)=>[r.id+":"+si+":"+ti, scaleText(s.t, r.k||1), [s.timed ? "About "+fmtDur(s.m) : "", batchNote(s.t, r.k||1)].filter(Boolean).join(" ")]) });
     off += dur;
   });
   const total = off;
@@ -384,6 +489,13 @@ function recipePlan(r){
   });
   if (!servedInSteps) blocks.push({ off:total, dur:0, kind:"serve", ings:[], tasks:[[r.id+":s","Plate and serve",""]] });
   return { total, prepDur: prep ? pm : 0, prep, blocks };
+}
+function batchNote(t, k){
+  if (k < 2) return "";
+  if (/\b(brown|sear|saut[eé]|fry|crisp)\b/i.test(t)) return "Big batch: work in batches so it browns instead of steaming.";
+  if (/\b(bake|roast)\b/i.test(t)) return "Big batch: a fuller oven or bigger pan runs slower. Go by doneness, not just the clock.";
+  if (/\b(boil|simmer)\b/i.test(t)) return "Big batch: a fuller pot takes longer to come up to temperature.";
+  return "";
 }
 function cap(s){ s = String(s||""); return s.charAt(0).toUpperCase() + s.slice(1); }
 function fmtDur(m){ m=Math.round(m); const h=Math.floor(m/60), mm=m%60; return h ? h+" hr"+(mm? " "+mm+" min":"") : mm+" min"; }
@@ -446,8 +558,10 @@ function label(B){ const a = anchor(); return a ? fmt(a + B.off*60000) : rel(B.o
 const main = document.getElementById("main"), tl = document.getElementById("timeline"), tools = document.getElementById("tools"), nav = document.getElementById("nav");
 
 function renderTools(){
-  if (S.view === "setup") { tools.innerHTML = S.recipes.length ? `<button class="chip-btn" data-act="cook" type="button">Cook view</button>` : ""; return; }
-  tools.innerHTML = `<button class="chip-btn" data-act="setup" type="button">Recipes</button>`
+  const list = S.recipes.length ? `<button class="chip-btn ${S.view==="list"?"set":""}" data-act="list" type="button">Shopping list</button>` : "";
+  if (S.view === "setup") { tools.innerHTML = list + (S.recipes.length ? `<button class="chip-btn" data-act="cook" type="button">Cook view</button>` : ""); return; }
+  if (S.view === "list") { tools.innerHTML = `<button class="chip-btn" data-act="setup" type="button">Recipes</button><button class="chip-btn" data-act="cook" type="button">Cook view</button>`; return; }
+  tools.innerHTML = `<button class="chip-btn" data-act="setup" type="button">Recipes</button>` + list
     + `<button class="chip-btn ${S.target?"set":""}" data-act="ready" type="button">${S.target ? "Ready "+fmt(S.target) : "Ready by"}</button>`
     + (anchor() ? `<button class="chip-btn" data-act="now" type="button">Now</button>` : "")
     + `<button class="chip-btn" data-act="reset" type="button">Reset</button>`;
@@ -456,6 +570,7 @@ function renderTools(){
 function render(){
   renderTools();
   if (S.view === "setup") return renderSetup();
+  if (S.view === "list") return renderList();
   renderCook();
 }
 
@@ -467,7 +582,7 @@ function renderSetup(){
   let h = `<h2>Add a recipe</h2>
   <div class="card">
     <form id="urlForm" class="row" autocomplete="off">
-      <input class="field" id="url" type="url" inputmode="url" placeholder="Paste a recipe link" aria-label="Recipe link">
+      <input class="field" id="url" type="text" inputmode="url" autocapitalize="off" spellcheck="false" placeholder="Paste a recipe link" aria-label="Recipe link">
       <button class="btn go" type="submit" ${busy?"disabled":""}>${busy?"Reading":"Import"}</button>
     </form>
     ${importMsg ? `<div class="msg ${importErr?"err":"ok"}">${esc(importMsg)}</div>` : ""}
@@ -483,21 +598,22 @@ function renderSetup(){
     const open = !!S.open[r.id];
     h += `<div class="rc" style="--c:${r.color}">
       <div class="nm">${esc(r.name)}</div>
-      <div class="meta">${r.ings.length} ingredients · ${r.steps.length} steps · ${fmtDur(t)} planned${r.url ? `<br><a href="${esc(r.url)}" style="color:var(--muted)">${esc(r.url.replace(/^https?:\/\/(www\.)?/,"").slice(0,60))}</a>` : ""}</div>
+      <div class="meta">${r.ings.length} ingredients · ${r.steps.length} steps · ${fmtDur(t)} planned${servings(r) ? " · " + servings(r) : ""}${r.url ? `<br><a href="${esc(r.url)}" style="color:var(--muted)">${esc(r.url.replace(/^https?:\/\/(www\.)?/,"").slice(0,60))}</a>` : ""}</div>
+      <div class="batch" role="group" aria-label="Batch size">${BATCHES.map(b=>`<button type="button" class="${(r.k||1)===b?"on":""}" data-act="batch" data-id="${r.id}" data-k="${b}">${b===0.5?"½":b}x</button>`).join("")}</div>
       <div class="acts">
         <button class="btn sm" type="button" data-act="review" data-id="${r.id}">${open ? "Close times" : "Review times"}</button>
         <button class="btn sm" type="button" data-act="rename" data-id="${r.id}">Rename</button>
         <button class="btn sm del" type="button" data-act="remove" data-id="${r.id}">Remove</button>
       </div>`;
     if (open) {
-      h += `<div class="rv"><div class="hint" style="margin:0 0 6px">Minutes come from the recipe text. Fix any that look off; an orange box is your override. Clear it to go back to the estimate.</div>`;
+      h += `<div class="rv"><div class="hint" style="margin:0 0 6px">Minutes come from the recipe text${(r.k||1)!==1 ? `, adjusted for a ${r.k}x batch` : ""}. Fix any that look off; an orange box is your override and is saved with the recipe. Clear it to go back to the estimate.</div>`;
       if (prepItems(r).length) {
-        const auto = (()=>{ const n = prepItems(r).length; return Math.max(5, n*3); })();
+        const auto = autoPrepMin(r);
         h += `<div class="st"><div class="tx"><b>Prep</b> · ${prepItems(r).map(p=>esc(p.name)).join(", ")}</div>
           <div><input type="number" min="0" inputmode="numeric" data-prep="${r.id}" value="${r.prepOver!=null && r.prepOver!=="" ? r.prepOver : auto}" class="${r.prepOver!=null && r.prepOver!=="" ? "edited":""}" aria-label="Prep minutes"><div class="u">min</div></div></div>`;
       }
       r.steps.forEach((st,si)=>{
-        const auto = st.sents.reduce((a,s)=>a+s.m,0);
+        const auto = autoStepMin(r, si);
         const ov = r.over[si]!=null && r.over[si]!=="";
         const text = st.sents.map(s=>s.t).join(" ");
         h += `<div class="st"><div class="tx"><b>Step ${si+1}</b> · ${esc(text.length>220 ? text.slice(0,217)+"…" : text)}</div>
@@ -516,9 +632,66 @@ function renderSetup(){
       <div class="hint">${S.target ? `Start at <b style="color:var(--accent)">${fmt(S.target - PLAN.total*60000, true)}</b> to have everything ready at ${fmt(S.target, true)}. Total plan: ${fmtDur(PLAN.total)}.` : `Optional. Set it and every step gets a clock time. Total plan: ${fmtDur(PLAN.total)}.`}</div>
     </div>
     <button class="big solid" type="button" data-act="cook">Build the game plan</button>`;
-  } else {
+  } else if (!S.library.length) {
     h += `<button class="linkbtn" type="button" data-act="sample">Try it with a sample recipe</button>`;
   }
+  h += boxHtml();
+  main.innerHTML = h;
+}
+
+/* ---------- recipe box ---------- */
+let boxQuery = "", backupOpen = false;
+function boxHtml(){
+  const inMeal = new Set(S.recipes.map(r=>r.id));
+  const q = boxQuery.trim().toLowerCase();
+  const list = S.library.slice().sort((a,b)=>(b.used||b.saved||0)-(a.used||a.saved||0))
+    .filter(r=>!q || r.name.toLowerCase().includes(q) || (r.url||"").toLowerCase().includes(q));
+  let h = `<h2>Recipe box</h2>`;
+  if (!S.library.length) return h + `<div class="empty">Every recipe you add is saved here so you can reuse it, along with any time fixes you make.</div>`;
+  if (S.library.length > 5) h += `<input class="field" id="boxq" type="search" placeholder="Search your recipes" value="${esc(boxQuery)}" style="margin-bottom:10px">`;
+  list.forEach(r=>{
+    const used = r.used ? "Last used " + new Date(r.used).toLocaleDateString([], {month:"short", day:"numeric"}) : "";
+    h += `<div class="bx">
+      <div class="bxm"><div class="bxn">${esc(r.name)}</div><div class="meta">${r.ings.length} ingredients${used ? " · " + used : ""}</div></div>
+      ${inMeal.has(r.id) ? `<span class="inmeal">In meal</span>` : `<button class="btn sm go" type="button" data-act="addLib" data-id="${r.id}">Add</button>`}
+      <button class="btn sm del" type="button" data-act="delLib" data-id="${r.id}" aria-label="Delete ${esc(r.name)}">✕</button>
+    </div>`;
+  });
+  if (!list.length) h += `<div class="empty">No matches.</div>`;
+  h += `<button class="linkbtn" type="button" data-act="toggleBackup">${backupOpen ? "Hide backup" : "Back up or move your recipe box"}</button>`;
+  if (backupOpen) h += `<div class="card"><div class="hint" style="margin-top:0">Your recipe box lives in this browser. To move it to another phone or computer, copy the backup here and paste it into the same box there.</div>
+    <textarea class="field" id="backup" style="min-height:120px;margin-top:10px" placeholder="Paste a backup here to restore"></textarea>
+    <div class="row" style="margin-top:10px"><button class="btn" type="button" data-act="copyBackup" style="flex:1">Copy backup</button><button class="btn go" type="button" data-act="restore" style="flex:1">Restore</button></div>
+    ${backupMsg ? `<div class="msg ok">${esc(backupMsg)}</div>` : ""}</div>`;
+  return h;
+}
+let backupMsg = "";
+
+/* ---------- shopping list ---------- */
+function listText(){
+  return S.recipes.map(r=>{
+    const head = r.name + ((r.k||1)!==1 ? " (" + r.k + "x)" : "");
+    return head + "\n" + r.ings.map(i=>"- " + scaleLine(i, r.k||1)).join("\n");
+  }).join("\n\n");
+}
+let copyMsg = "";
+function renderList(){
+  tl.innerHTML = ""; tl.style.display = "none"; nav.style.display = "none";
+  const total = S.recipes.reduce((a,r)=>a + r.ings.length, 0);
+  const have = S.recipes.reduce((a,r)=>a + r.ings.filter((_,i)=>S.have[r.id+":"+i]).length, 0);
+  let h = `<div class="ilist"><div class="top2"><div class="title">Shopping list</div><div class="meta">${have} of ${total} checked</div></div>`;
+  S.recipes.forEach(r=>{
+    h += `<h2 style="color:${r.color}">${esc(r.name)}</h2>
+      <div class="batch" role="group" aria-label="Batch size for ${esc(r.name)}">${BATCHES.map(b=>`<button type="button" class="${(r.k||1)===b?"on":""}" data-act="batch" data-id="${r.id}" data-k="${b}">${b===0.5?"½":b}x</button>`).join("")}</div>
+      <div class="ings" style="--c:${r.color}"><ul>`;
+    r.ings.forEach((line,i)=>{
+      const key = r.id+":"+i, on = !!S.have[key];
+      h += `<li style="padding:0"><label class="irow ${on?"have":""}"><input type="checkbox" data-have="${key}" ${on?"checked":""}><span class="nm">${esc(scaleLine(line, r.k||1))}</span></label></li>`;
+    });
+    h += `</ul></div>${servings(r) ? `<div class="hint">${servings(r)}</div>` : ""}`;
+  });
+  h += `<div class="row" style="margin-top:18px"><button class="btn" type="button" data-act="copyList" style="flex:1">Copy list</button><button class="btn" type="button" data-act="clearHave" style="flex:1">Uncheck all</button></div>
+    ${copyMsg ? `<div class="msg ok">${esc(copyMsg)}</div>` : ""}</div>`;
   main.innerHTML = h;
 }
 function hhmm(ms){ const d=new Date(ms); return String(d.getHours()).padStart(2,"0")+":"+String(d.getMinutes()).padStart(2,"0"); }
@@ -589,15 +762,26 @@ document.addEventListener("keydown", e=>{ if (e.key==="Escape") modal.classList.
    Actions
    ============================================================ */
 async function importUrl(u){
+  u = u.trim();
   busy = true; importMsg = ""; render();
   try {
-    const res = await fetch("/api/recipe?url=" + encodeURIComponent(u));
-    let data = null; try { data = await res.json(); } catch(e) {}
-    if (!res.ok || !data || !data.recipe) throw new Error((data && data.error) || "Import only works on the hosted site. Paste the recipe text instead.");
-    const r = fromJsonLd(data.recipe, data.url || u);
-    if (!r.steps.length || !r.ings.length) throw new Error("Found the recipe but couldn't read its ingredients or steps. Paste the text instead.");
-    S.recipes.push(r); S.open[r.id] = true; afterChange();
-    importMsg = `Added ${r.name}. Check the step times below.`; importErr = false;
+    if (!/^https?:\/\//i.test(u)) u = "https://" + u;
+    let res, data = null;
+    try { res = await fetch("/api/recipe?url=" + encodeURIComponent(u)); } catch(e) { throw new Error("Couldn't reach the import service. Check your connection, or paste the recipe text instead."); }
+    try { data = await res.json(); } catch(e) {}
+    if (!data) throw new Error(location.hostname.endsWith("pages.dev") || location.hostname.includes("cloudflare")
+      ? "The import service didn't answer. Check that the functions folder deployed in Cloudflare, or paste the recipe text instead."
+      : "Link import only works on the hosted site (pages.dev). Paste the recipe text instead.");
+    const host = (()=>{ try { return new URL(u).hostname.replace(/^www\./,""); } catch(e) { return ""; } })();
+    let r = null;
+    if (data.recipe) r = fromJsonLd(data.recipe, data.url || u);
+    else if (data.text) { r = fromText(data.text, ""); r.name = data.title || (host ? "Recipe from " + host : "Imported recipe"); r.url = u; }
+    if (!r) throw new Error((data.error || "Couldn't read that page.") + (data.tried ? " (Tried: " + data.tried.map(t=>t.via + " " + t.status).join(", ") + ")" : ""));
+    if (!r.steps.length || !r.ings.length) throw new Error("Found the page but couldn't pick out the ingredients and steps. Paste the text instead.");
+    const dupe = S.library.find(x=>x.url && x.url === r.url);
+    if (dupe) { if (!addToMeal(dupe, 1)) throw new Error(dupe.name + " is already in this meal."); afterChange(); importMsg = `${dupe.name} was already in your recipe box, so I added that copy with your saved times.`; importErr = false; busy = false; render(); return; }
+    addToMeal(r, 1); S.open[r.id] = true; afterChange();
+    importMsg = `Added ${r.name}${data.via && data.via !== "site" ? " (read through a backup route, so double check it)" : ""}. Check the step times below.`; importErr = false;
   } catch(e) {
     importMsg = e.message || String(e); importErr = true; pasteOpen = true;
   }
@@ -650,12 +834,27 @@ document.addEventListener("click", e=>{
       const text = act==="sample" ? SAMPLE : (document.getElementById("paste")||{}).value || "";
       const rec = fromText(text);
       if (!rec.ings.length || !rec.steps.length) { importMsg = "Couldn't find both ingredients and steps. Put an Ingredients heading and an Instructions heading above each list."; importErr = true; render(); return; }
-      S.recipes.push(rec); S.open[rec.id] = true; afterChange();
+      addToMeal(rec, 1); S.open[rec.id] = true; afterChange();
       importMsg = `Added ${rec.name}. Check the step times below.`; importErr = false; pasteOpen = false; render();
+    }
+    else if (act==="batch" && r) { r.k = +t.dataset.k; syncLib(r); buildPlan(); save(); const y = window.scrollY; render(); window.scrollTo(0,y); }
+    else if (act==="list") { S.view = "list"; copyMsg = ""; save(); render(); window.scrollTo(0,0); }
+    else if (act==="copyList") { const txt = listText(); (navigator.clipboard ? navigator.clipboard.writeText(txt) : Promise.reject()).then(()=>{ copyMsg = "Copied. Paste it into a note or a text."; render(); }, ()=>{ copyMsg = "Couldn't copy here. Long-press to select the list instead."; render(); }); }
+    else if (act==="clearHave") { S.have = {}; save(); render(); }
+    else if (act==="addLib") { const L = S.library.find(x=>x.id===id); if (L && addToMeal(L, 1)) { afterChange(); importMsg = `Added ${L.name} from your recipe box.`; importErr = false; render(); } }
+    else if (act==="delLib") { const L = S.library.find(x=>x.id===id); if (L) ask(`Delete <b>${esc(L.name)}</b> from your recipe box?${S.recipes.some(x=>x.id===id) ? " It stays in this meal until you remove it." : ""}`, "Delete", ()=>{ S.library = S.library.filter(x=>x.id!==id); save(); render(); }); }
+    else if (act==="toggleBackup") { backupOpen = !backupOpen; backupMsg = ""; render(); }
+    else if (act==="copyBackup") { const txt = JSON.stringify({ app:"recipe-game-plan", v:1, library:S.library }); const box = document.getElementById("backup"); (navigator.clipboard ? navigator.clipboard.writeText(txt) : Promise.reject()).then(()=>{ backupMsg = `Copied ${S.library.length} recipes.`; render(); }, ()=>{ if (box) { box.value = txt; box.select(); } backupMsg = "Couldn't copy automatically. The backup is in the box, so select and copy it."; }); }
+    else if (act==="restore") {
+      const box = document.getElementById("backup"); let data = null;
+      try { data = JSON.parse(box.value); } catch(e) {}
+      if (!data || !Array.isArray(data.library)) { backupMsg = "That doesn't look like a recipe box backup."; render(); return; }
+      let n = 0; data.library.forEach(x=>{ if (x && x.id && Array.isArray(x.ings) && Array.isArray(x.steps) && !S.library.some(y=>y.id===x.id)) { S.library.push(x); n++; } });
+      backupMsg = `Restored ${n} recipe${n===1?"":"s"}.`; save(); render();
     }
     else if (act==="review" && r) { S.open[id] = !S.open[id]; save(); render(); }
     else if (act==="remove" && r) ask(`Remove <b>${esc(r.name)}</b> from this meal?`, "Remove", ()=>{ S.recipes = S.recipes.filter(x=>x.id!==id); delete S.open[id]; afterChange(); render(); });
-    else if (act==="rename" && r) ask(`<label for="rn" style="display:block;margin-bottom:8px;color:var(--muted)">Recipe name</label><input class="field" id="rn" value="${esc(r.name)}">`, "Save", ()=>{ const v = document.getElementById("rn").value.trim(); if (v) { r.name = v; buildPlan(); save(); render(); } });
+    else if (act==="rename" && r) ask(`<label for="rn" style="display:block;margin-bottom:8px;color:var(--muted)">Recipe name</label><input class="field" id="rn" value="${esc(r.name)}">`, "Save", ()=>{ const v = document.getElementById("rn").value.trim(); if (v) { r.name = v; syncLib(r); buildPlan(); save(); render(); } });
     else if (act==="clearReady") { S.target = null; save(); render(); }
     else if (act==="cook") { buildPlan(); S.view = "cook"; save(); render(); window.scrollTo(0,0); }
     else if (act==="setup") { S.view = "setup"; save(); render(); window.scrollTo(0,0); }
@@ -685,18 +884,27 @@ document.addEventListener("change", e=>{
     if (el.checked) S.done[el.dataset.id] = true; else delete S.done[el.dataset.id];
     save(); const y = window.scrollY; render(); window.scrollTo(0,y); return;
   }
+  if (el.matches("input[data-have]")) {
+    if (el.checked) S.have[el.dataset.have] = true; else delete S.have[el.dataset.have];
+    save(); const y = window.scrollY; render(); window.scrollTo(0,y); return;
+  }
   if (el.id === "readyIn") { if (el.value) setReady(el.value); return; }
   if (el.dataset.step) {
     const [rid, si] = el.dataset.step.split(":"); const r = S.recipes.find(x=>x.id===rid); if (!r) return;
-    const auto = r.steps[si].sents.reduce((a,s)=>a+s.m,0);
+    const auto = autoStepMin(r, +si);
     if (el.value==="" || +el.value===auto) delete r.over[si]; else r.over[si] = Math.max(0, Math.round(+el.value));
-    buildPlan(); save(); const y = window.scrollY; render(); window.scrollTo(0,y); return;
+    syncLib(r); buildPlan(); save(); const y = window.scrollY; render(); window.scrollTo(0,y); return;
   }
   if (el.dataset.prep) {
     const r = S.recipes.find(x=>x.id===el.dataset.prep); if (!r) return;
-    r.prepOver = el.value==="" ? null : Math.max(0, Math.round(+el.value));
-    buildPlan(); save(); const y = window.scrollY; render(); window.scrollTo(0,y);
+    r.prepOver = (el.value==="" || +el.value===autoPrepMin(r)) ? null : Math.max(0, Math.round(+el.value));
+    syncLib(r); buildPlan(); save(); const y = window.scrollY; render(); window.scrollTo(0,y);
   }
+});
+document.addEventListener("input", e=>{
+  if (e.target.id !== "boxq") return;
+  boxQuery = e.target.value; render();
+  const f = document.getElementById("boxq"); if (f) { f.focus(); f.setSelectionRange(f.value.length, f.value.length); }
 });
 document.getElementById("prev").onclick = ()=>go(S.idx-1);
 document.getElementById("next").onclick = ()=>go(S.idx+1);
