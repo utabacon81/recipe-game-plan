@@ -216,7 +216,7 @@ function preview(){
         pill = `<span class="pill ${isWait ? "w" : "h"}">${fmtDur(tot)} ${isWait ? "wait" : "hands-on"}${est}</span>`;
       }
     }
-    return `<li><span class="n">${i+1}</span><span class="tx">${esc(text.length > 140 ? text.slice(0,137)+"…" : text)}</span>${pill}</li>`;
+    return `<li><span class="n">${i+1}</span><span class="tx">${esc(text)}</span>${pill}</li>`;
   }).join("") : `<li><span class="tx" style="color:var(--muted)">Steps show up here as you type.</span></li>`;
   const ings = readIngs();
   const nPrep = ings.map(parseIng).filter(p=>p.prep).length;
@@ -296,7 +296,7 @@ function save(addToMeal){
   if (mi >= 0 || addToMeal) {
     if (mi >= 0) {
       const old = S.recipes[mi];
-      S.recipes[mi] = Object.assign(JSON.parse(JSON.stringify(rec)), { k: old.k || 1, color: old.color });
+      S.recipes[mi] = Object.assign(JSON.parse(JSON.stringify(rec)), { k: old.k || 1, color: old.color }, old.readyBy ? { readyBy: old.readyBy } : {});
       Object.keys(S.have || {}).forEach(k=>{ if (k.startsWith(rec.id + ":")) delete S.have[k]; });
     } else {
       const used = new Set(S.recipes.map(x=>x.color));

@@ -127,6 +127,12 @@
   .qtimes span{color:var(--muted)}
   .cf{padding:10px 0;border-top:1px solid var(--line);font-size:15px;line-height:1.45}
   .cf:first-child{border-top:none;padding-top:0}
+  .tlday{flex:0 0 auto;align-self:center;font:600 12px Oswald,sans-serif;letter-spacing:1.5px;text-transform:uppercase;color:var(--done);padding:0 4px 0 10px;border-left:2px solid var(--line);margin-left:4px;white-space:nowrap}
+  .tlday:first-child{border-left:none;margin-left:0;padding-left:0}
+  .rb{margin-top:12px}
+  .rb .readyrow input{font-size:15px}
+  .rb .when2{color:var(--muted);font-size:14px;margin-top:6px;line-height:1.45}
+  .warnline{color:#F0A99D;font-size:14px;margin-top:8px;line-height:1.45}
   .dayh{font:600 14px Oswald,sans-serif;letter-spacing:2px;text-transform:uppercase;color:var(--done);margin-bottom:6px}
   .modal{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none;align-items:center;justify-content:center;padding:24px;z-index:10}
   .modal.open{display:flex}
@@ -178,7 +184,7 @@ S.recipes.forEach(r=>{ if (!r.k) r.k = 1; if (!S.library.some(x=>x.id===r.id)) S
 const BATCHES = [0.5, 1, 1.5, 2, 3];
 
 /* The recipe box keeps a master copy of every recipe. The meal holds working copies with a batch size. */
-function libCopy(r){ const c = JSON.parse(JSON.stringify(r)); delete c.k; delete c.color; c.saved = c.saved || Date.now(); return c; }
+function libCopy(r){ const c = JSON.parse(JSON.stringify(r)); delete c.k; delete c.color; delete c.readyBy; c.saved = c.saved || Date.now(); return c; }
 function syncLib(r){
   const i = S.library.findIndex(x=>x.id===r.id);
   const c = libCopy(r); c.used = Date.now();
@@ -260,9 +266,10 @@ function activeFactor(k){ return 1 + 0.5*Math.max(0, k-1); }
 function autoStepMin(r, i){ const k = r.k || 1; return Math.round(r.steps[i].sents.reduce((a,s)=>a + (s.timed ? s.m : s.m*activeFactor(k)), 0)); }
 function stepMin(r, i){ const o = r.over[i]; return (o!=null && o!=="") ? +o : autoStepMin(r, i); }
 /* ---------- quiet hours ----------
-   Hands-on work and the start of any wait stay out of the quiet window when an eat time is set.
-   Flexible waits (brine, marinate, chill, overnight) stretch up to 2x to make that work.
-   A step that still lands in quiet hours needs your OK. */
+   S.quiet holds the off-hours (default 10pm to 10am); the app shows it as active hours.
+   Hands-on steps outside active hours get flagged for an OK. Waits can run any time, but a flexible
+   wait (soak, brine, chill, overnight) that would start in off-hours starts the evening before. */
+const WAITV = /\b(simmer|bake|roast|rest|soak|chill|refrigerat|marinat|brais|steep|rise|rising|proof|thaw|cool|smoke|sous vide|reduce|boil|poach|cure|curing|brine|freez|stand|slow cook|pressure cook|reheat|warm|dry|bath|oven|let (it|them) (sit|set))\w*/i;
 const FLEX = /\b(brin(?:e|ed|es|ing)|marinat\w*|soak\w*|refrigerat\w*|chill\w*|overnight|cure[ds]?|curing|dry[- ]brin\w*|cold[- ]ferment\w*)\b/i;
 function hm(s){ const [h,m] = String(s||"0:00").split(":").map(Number); return (h||0)*60 + (m||0); }
 function quietAt(ms){
@@ -277,15 +284,14 @@ function dayKey(ms){ const d = new Date(ms); return d.getFullYear()+"-"+(d.getMo
 /* Times are minutes relative to the eat time (0). */
 function makeCtx(T){
   const ctx = { T, conflicts:[], notes:[] };
-  /* If you eat inside quiet hours, the run-up to the meal is fair game. */
-  let qCut = Infinity;
-  if (T && quietAt(T)) { let x = 0; while (x > -1440 && quietAt(T + x*60000)) x -= 5; qCut = x + 5; }
-  ctx.Q = x => !!T && x < qCut && quietAt(T + x*60000);
-  ctx.ok = (b, e, hands)=>{ if (ctx.Q(b)) return false; if (hands) for (let x = b; x < e; x += 5) if (ctx.Q(x)) return false; return true; };
+  ctx.Q = x => !!T && quietAt(T + x*60000);
+  /* Only hands-on time has to fall inside active hours. Soaks, simmers and other waits can run any time. */
+  /* hands: true for the whole span, a number for that many hands-on minutes from the start, or 0 for none. */
+  ctx.ok = (b, e, hands)=>{ if (!hands) return true; const end = hands === true ? Math.max(e, b+1) : b + Math.max(1, hands); for (let x = b; x < end; x += 5) if (ctx.Q(x)) return false; return true; };
   ctx.search = (from, limit, test)=>{ for (let x = Math.floor(from/5)*5; x >= limit; x -= 5) if (test(x)) return x; return null; };
   return ctx;
 }
-function short(t, n){ t = String(t); n = n || 60; return t.length > n ? t.slice(0, n-3).replace(/\s+\S*$/,"") + "…" : t; }
+function short(t, n){ t = String(t); n = n || 60; return t.length > n ? t.slice(0, n).replace(/\s+\S*$/,"").replace(/[,;:]$/,"") : t; }
 
 /* Advance work hidden in an ingredient line, like "brined overnight" or "marinated 4 hours". */
 function advItems(r){ return r.ings.map(parseIng).map((p,i)=>({...p, i})).filter(p=>p.prep && durMin(p.prep) > 0); }
@@ -337,7 +343,11 @@ function recipeSchedule(r, ctx){
     if (si === lastReal && /\bserve\b/i.test(text) && !real.some(s=>s.timed) && r.over[si]==null) { dur = 0; serve = true; }
     const timed = real.filter(s=>s.timed).reduce((a,s)=>a+s.m,0), act = real.filter(s=>!s.timed).reduce((a,s)=>a+s.m,0);
     const wait = timed > 0 && timed >= act;
-    steps.push({ si, dur, serve, real, text, hands: !wait && dur > 0, flex: wait && dur >= 60 && FLEX.test(text), note:"" });
+    /* For active hours: a timed sentence counts as a wait only if it's waiting work (simmer, bake, soak, chill and so on). */
+    let wMin = 0, hMin = 0;
+    real.forEach(x=>{ if (x.timed && WAITV.test(x.t)) wMin += x.m; else hMin += x.m; });
+    if (wMin + hMin > 0 && dur !== wMin + hMin) hMin = Math.round(hMin * dur / (wMin + hMin));
+    steps.push({ si, dur, serve, real, text, hands: dur > 0 && hMin > 0 ? Math.min(dur, hMin) : 0, flex: wait && dur >= 60 && FLEX.test(text), note:"" });
   });
   /* Place steps from the last one back. */
   let cursor = 0;
@@ -349,17 +359,22 @@ function recipeSchedule(r, ctx){
       let fixed = false;
       if (s.flex) {
         const nb = ctx.search(b-5, e - flexCap(s.text, s.dur), x=>ctx.ok(x, e, false));
-        if (nb != null) { s.note = "Stretched from " + fmtDur(s.dur) + " to " + fmtDur(e-nb) + " so it starts before quiet hours."; ctx.notes.push({ x:nb, name:r.name, text:short(s.text) + " " + s.note.charAt(0).toLowerCase() + s.note.slice(1) }); b = nb; fixed = true; }
+        if (nb != null) { s.note = "Stretched from " + fmtDur(s.dur) + " to " + fmtDur(e-nb) + " to keep hands-on work in active hours."; ctx.notes.push({ x:nb, name:r.name, text:short(s.text) + " " + s.note.charAt(0).toLowerCase() + s.note.slice(1) }); b = nb; fixed = true; }
       }
       if (!fixed && nx && nx.flex) {
         const ne = ctx.search(e-5, nx.e - flexCap(nx.text, nx.dur), x=>ctx.ok(x - s.dur, x, s.hands) && !ctx.Q(x));
         if (ne != null) {
-          nx.b = ne; nx.note = "Stretched to " + fmtDur(nx.e - ne) + " so the step before it stays out of quiet hours.";
+          nx.b = ne; nx.note = "Stretched to " + fmtDur(nx.e - ne) + " so the step before it stays in active hours.";
           ctx.notes.push({ x:ne, name:r.name, text:short(nx.text) + " " + nx.note.charAt(0).toLowerCase() + nx.note.slice(1) });
           e = ne; b = e - s.dur; fixed = true;
         }
       }
       if (!fixed) ctx.conflicts.push({ key, x:b, name:r.name, text:s.text });
+    }
+    /* A flexible wait (soak, thaw overnight, brine) that would start outside active hours starts the evening before instead. Never flagged. */
+    if (!s.hands && s.flex && ctx.Q(b)) {
+      const nb = ctx.search(b-5, e - flexCap(s.text, s.dur), x=>!ctx.Q(x));
+      if (nb != null) { s.note = "Starts early so it begins in active hours. Runs " + fmtDur(e-nb) + "."; ctx.notes.push({ name:r.name, text:short(s.text).replace(/[.!]$/,"") + " now runs " + fmtDur(e-nb) + " so it starts in active hours." }); b = nb; }
     }
     s.b = b; s.e = e; cursor = b;
   }
@@ -376,7 +391,7 @@ function recipeSchedule(r, ctx){
       ings.push({ raw: again ? p.name : scaleLine(p.raw, k), prepped: !again && !!p.prep, again });
     });
     const tasks = s.real.map((x,ti)=>[r.id+":"+s.si+":"+ti, scaleText(x.t, k), [x.timed ? "About "+fmtDur(x.m) : "", batchNote(x.t, k)].filter(Boolean).join(" ")]);
-    if (s.note && tasks.length) { const t = tasks[tasks.length-1]; t[2] = [t[2], s.note].filter(Boolean).join(" "); }
+    if (s.note && tasks.length) { const t = tasks[tasks.length-1]; t[2] = [t[2] ? t[2].replace(/\.?$/, ".") : "", s.note].filter(Boolean).join(" "); }
     blocks.push({ x:s.b, dur:s.e - s.b, kind:"step", si:s.si, ings, tasks, key:r.id+":"+s.si });
   });
   /* Preheats land 15 minutes before the oven step. */
@@ -392,10 +407,9 @@ function recipeSchedule(r, ctx){
     const e = users.length ? Math.min(...users.map(s=>s.b)) : (steps.length ? steps[0].b : 0);
     let b = e - dur, note = "";
     const key = r.id + ":a:" + p.i;
-    if (ctx.Q(b) && !S.approved[key]) {
+    if (ctx.Q(b)) {
       const nb = ctx.search(b-5, e - flexCap(p.prep, dur), x=>!ctx.Q(x));
-      if (nb != null) { note = " Stretched to " + fmtDur(e-nb) + " so it starts before quiet hours."; ctx.notes.push({ x:nb, name:r.name, text:cap(p.name) + " stretched to " + fmtDur(e-nb) + "." }); b = nb; }
-      else ctx.conflicts.push({ key, x:b, name:r.name, text:cap(p.name) + ": " + p.prep });
+      if (nb != null) { note = " Starts earlier so it begins in active hours."; b = nb; }
     }
     blocks.push({ x:b, dur:0, kind:"advance", ings:[{ raw:scaleLine(p.raw, k), prepped:false, again:false }], key,
       tasks:[[r.id+":a:"+p.i, "Start ahead. " + cap(p.name) + ": " + p.prep, "Needs about " + fmtDur(dur) + " before it's used." + note]] });
@@ -417,31 +431,46 @@ function batchNote(t, k){
   return "";
 }
 
-/* ---------- meal plan (all recipes finish together) ---------- */
-let PLAN = { total:0, blocks:[], conflicts:[], notes:[], multiDay:false };
+/* ---------- meal plan ----------
+   Each recipe finishes at its own ready-by (r.readyBy on the meal entry) or, by default, the meal's.
+   Recipes that share a ready-by share one prep block, right before the first of them starts cooking.
+   Positions are minutes relative to the plan reference G (the meal ready-by, or the latest recipe ready-by). */
+let PLAN = { total:0, blocks:[], conflicts:[], notes:[], multiDay:false, start:0, startMs:null, endMs:null, info:{} };
+function planRef(){ const ends = S.recipes.map(r=>r.readyBy).filter(Boolean); return S.target || (ends.length ? Math.max(...ends) : null); }
 function buildPlan(){
-  const T = S.target || null;
-  const ctx = makeCtx(T);
-  const per = S.recipes.map(r=>({ r, p: recipeSchedule(r, ctx) }));
-  const all = [];
-  /* Prep for recipes that start cooking the same day happens together, right before the first of them. */
-  const groups = new Map();
-  per.forEach(x=>{ if (!x.p.prepDur) return; const d = T ? dayKey(T + x.p.firstStart*60000) : "all"; if (!groups.has(d)) groups.set(d, []); groups.get(d).push(x); });
-  groups.forEach((list, d)=>{
+  const G = planRef();
+  const conflicts = [], notes = [], all = [], groups = new Map(), info = {};
+  const per = S.recipes.map(r=>{
+    const R = r.readyBy || G;
+    const ctx = makeCtx(R);
+    const p = recipeSchedule(r, ctx);
+    const d = (R && G) ? (R - G)/60000 : 0;
+    ctx.conflicts.forEach(c=>conflicts.push(Object.assign({ ms: R ? R + c.x*60000 : null, rid:r.id }, c)));
+    notes.push(...ctx.notes);
+    const x = { r, p, R, d };
+    const gk = r.readyBy ? "t" + r.readyBy : "meal";
+    if (p.prepDur) { if (!groups.has(gk)) groups.set(gk, []); groups.get(gk).push(x); }
+    info[r.id] = { start: p.blocks.length ? Math.min(...p.blocks.map(b=>b.x)) + d : d, end: d };
+    return x;
+  });
+  groups.forEach((list, gk)=>{
+    const { R, d } = list[0];
+    const ctx = makeCtx(R);
     const sum = list.reduce((a,x)=>a + x.p.prepDur, 0);
     const e = Math.min(...list.map(x=>x.p.firstStart));
     let b = e - sum;
-    const key = "prep:" + d;
+    const key = "prep:" + gk;
+    const names = list.map(x=>x.r.name).join(" + ");
     if (!ctx.ok(b, e, true) && !S.approved[key]) {
       const nb = ctx.search(b-5, b - 1440, x=>ctx.ok(x, x + sum, true));
-      if (nb != null) { ctx.notes.push({ x:nb, name:list.map(x=>x.r.name).join(" + "), text:"Prep moved earlier to stay out of quiet hours." }); b = nb; }
-      else ctx.conflicts.push({ key, x:b, name:list.map(x=>x.r.name).join(" + "), text:"Prep work" });
+      if (nb != null) { notes.push({ name:names, text:"Prep moved earlier to keep it in active hours." }); b = nb; }
+      else { const c = { key, x:b, ms: R ? R + b*60000 : null, name:names, text:"Prep work" }; conflicts.push(c); list.forEach(x=>{ (info[x.r.id].extra = info[x.r.id].extra || []).push(c); }); }
     }
-    list.forEach(({r,p})=>all.push({ x:b, dur:sum, kind:"prep", r, ings:p.prepIngs, tasks:p.prepTasks, key }));
+    list.forEach(({r,p})=>{ all.push({ x:b + d, dur:sum, kind:"prep", r, ings:p.prepIngs, tasks:p.prepTasks, key }); info[r.id].start = Math.min(info[r.id].start, b + d); });
   });
-  per.forEach(({r,p})=>p.blocks.forEach(bl=>all.push(Object.assign({ r }, bl))));
-  const start = Math.min(0, ...all.map(a=>a.x));
-  const total = -start;
+  per.forEach(({r,p,d})=>p.blocks.forEach(bl=>all.push(Object.assign({ r }, bl, { x: bl.x + d }))));
+  const xs = all.map(a=>a.x);
+  const start = xs.length ? Math.min(...xs) : 0, endX = xs.length ? Math.max(...xs) : 0;
   const byOff = new Map();
   all.forEach(b=>{
     const off = Math.max(0, Math.round(b.x - start));
@@ -454,21 +483,28 @@ function buildPlan(){
   });
   const blocks = [...byOff.values()].sort((a,b)=>a.off-b.off);
   blocks.forEach(B=>{
-    if (B.kinds.size===1 && B.kinds.has("serve")) B.headline = "Ready. Plate and serve.";
+    if (B.kinds.size===1 && B.kinds.has("serve")) B.headline = B.off === Math.round(endX - start) ? "Ready. Plate and serve." : B.groups.map(g=>g.label).join(" + ") + (B.groups.length > 1 ? " are" : " is") + " ready.";
     else if (B.kinds.has("prep")) B.headline = "Prep work. Get everything cut and measured.";
     else if (B.groups.length > 1) B.headline = B.groups.map(g=>g.label).join(" + ");
     else B.headline = short(B.groups[0].tasks[0][1], 90);
-    B.conflicts = ctx.conflicts.filter(c=>B.keys.has(c.key));
+    B.conflicts = conflicts.filter(c=>B.keys.has(c.key));
   });
-  const multiDay = T ? dayKey(T + start*60000) !== dayKey(T) : total >= 1440;
-  PLAN = { total, blocks, conflicts: ctx.conflicts, notes: ctx.notes, multiDay, start };
+  const total = endX - start;
+  const startMs = G ? G + start*60000 : null, endMs = G ? G + endX*60000 : null;
+  Object.keys(info).forEach(id=>{
+    const I = info[id];
+    I.startMs = G ? G + I.start*60000 : null; I.endMs = G ? G + I.end*60000 : null;
+    I.conflicts = conflicts.filter(c=>c.rid===id).concat(I.extra || []);
+  });
+  const multiDay = G ? dayKey(startMs) !== dayKey(endMs) : total >= 1440;
+  PLAN = { total, blocks, conflicts, notes, multiDay, start, startMs, endMs, info };
   if (S.idx >= blocks.length) S.idx = 0;
 }
 
 /* ============================================================
    Time
    ============================================================ */
-function anchor(){ if (S.startAt) return S.startAt; if (S.target) return S.target - PLAN.total*60000; return null; }
+function anchor(){ return S.startAt || PLAN.startMs || null; }
 function fmt(ms, withDay){
   const d = new Date(ms);
   let h = d.getHours(), m = d.getMinutes(), ap = h>=12 ? "pm" : "am";
@@ -486,7 +522,8 @@ function rel(off){ const h=Math.floor(off/60), m=off%60; return "+" + h + ":" + 
 function wday(ms){ return new Date(ms).toLocaleDateString([], {weekday:"short"}); }
 function label(B){ const a = anchor(); if (!a) return rel(B.off); const ms = a + B.off*60000; return PLAN.multiDay ? wday(ms) + " " + fmt(ms) : fmt(ms); }
 function wdate(ms){ return new Date(ms).toLocaleDateString([], {weekday:"short", month:"short", day:"numeric"}); }
-function whenX(x){ return S.target ? wdate(S.target + x*60000) + ", " + fmt(S.target + x*60000) : rel(Math.round(x - PLAN.start)); }
+function whenX(ms){ return ms ? wdate(ms) + ", " + fmt(ms) : ""; }
+function mdy(ms){ const d = new Date(ms); return wday(ms) + " " + (d.getMonth()+1) + "/" + d.getDate(); }
 function dtLocal(ms){ const d = new Date(ms), z = n=>String(n).padStart(2,"0"); return d.getFullYear()+"-"+z(d.getMonth()+1)+"-"+z(d.getDate())+"T"+z(d.getHours())+":"+z(d.getMinutes()); }
 
 /* ============================================================
@@ -539,6 +576,7 @@ function renderSetup(){
       <div class="nm">${esc(r.name)}</div>
       <div class="meta">${r.ings.length} ingredients · ${r.steps.length} steps · ${fmtDur(t)} planned${servings(r) ? " · " + servings(r) : ""}${r.url ? `<br><a href="${esc(r.url)}" style="color:var(--muted)">${esc(r.url.replace(/^https?:\/\/(www\.)?/,"").slice(0,60))}</a>` : ""}</div>
       <div class="batch" role="group" aria-label="Batch size">${BATCHES.map(b=>`<button type="button" class="${(r.k||1)===b?"on":""}" data-act="batch" data-id="${r.id}" data-k="${b}">${b===0.5?"½":b}x</button>`).join("")}</div>
+      ${rbHtml(r)}
       <div class="acts">
         <button class="btn sm" type="button" data-act="review" data-id="${r.id}">${open ? "Close times" : "Review times"}</button>
         <a class="btn sm" href="builder.html?id=${encodeURIComponent(r.id)}" style="display:inline-flex;align-items:center;text-decoration:none">Edit</a>
@@ -560,7 +598,7 @@ function renderSetup(){
         const auto = autoStepMin(r, si);
         const ov = r.over[si]!=null && r.over[si]!=="";
         const text = st.sents.map(s=>s.t).join(" ");
-        h += `<div class="st"><div class="tx"><b>Step ${si+1}</b> · ${esc(text.length>220 ? text.slice(0,217)+"…" : text)}</div>
+        h += `<div class="st"><div class="tx"><b>Step ${si+1}</b> · ${esc(text)}</div>
           <div><input type="number" min="0" inputmode="numeric" data-step="${r.id}:${si}" value="${ov ? r.over[si] : auto}" class="${ov?"edited":""}" aria-label="Step ${si+1} minutes"><div class="u">min</div></div></div>`;
       });
       h += `</div>`;
@@ -573,16 +611,17 @@ function renderSetup(){
     <div class="card">
       <div class="readyrow"><input type="datetime-local" id="readyIn" step="300" value="${S.target ? dtLocal(S.target) : ""}" aria-label="Eat date and time">
       ${S.target ? `<button class="btn" type="button" data-act="clearReady">Clear</button>` : ""}</div>
-      <div class="hint">${S.target ? `Start at <b style="color:var(--accent)">${wdate(S.target - PLAN.total*60000)}, ${fmt(S.target - PLAN.total*60000)}</b> to eat ${wdate(S.target)}, ${fmt(S.target)}. Total plan: ${fmtDur(PLAN.total)}.` : `Optional. Set it and every step gets a day and clock time. Total plan: ${fmtDur(PLAN.total)}.`}</div>
-      <label class="qrow"><input type="checkbox" id="qOn" ${S.quiet.on?"checked":""}> Quiet hours</label>
-      ${S.quiet.on ? `<div class="row qtimes"><input type="time" id="qFrom" step="900" value="${S.quiet.from}" aria-label="Quiet hours start"><span>to</span><input type="time" id="qTo" step="900" value="${S.quiet.to}" aria-label="Quiet hours end"></div>
-      <div class="hint">No hands-on steps in this window. Brines, marinades and other flexible waits stretch to make room.${S.target ? "" : " Applies once you set an eat time."}</div>` : ""}
+      <div class="hint">${PLAN.startMs ? `Plan starts <b style="color:var(--accent)">${whenX(PLAN.startMs)}</b>${S.target ? ` to eat ${whenX(S.target)}` : ""}. Total plan: ${fmtDur(PLAN.total)}.` : `Optional. Set it and every step gets a day and clock time. Total plan: ${fmtDur(PLAN.total)}.`}</div>
+      <label class="qrow"><input type="checkbox" id="qOn" ${S.quiet.on?"checked":""}> Active hours</label>
+      ${S.quiet.on ? `<div class="row qtimes"><input type="time" id="qTo" step="900" value="${S.quiet.to}" aria-label="Active hours start"><span>to</span><input type="time" id="qFrom" step="900" value="${S.quiet.from}" aria-label="Active hours end"></div>
+      <div class="hint">Hands-on steps outside this window get flagged. Soaks, simmers, thaws and other waits can run any time.${PLAN.startMs ? "" : " Applies once you set a ready-by."}</div>` : ""}
       ${PLAN.notes.length ? `<div class="hint" style="color:var(--done)">${PLAN.notes.map(n=>esc(n.name + ": " + n.text)).join("<br>")}</div>` : ""}
     </div>`;
+    PLAN.conflicts.sort((a,b)=>(a.ms||0)-(b.ms||0));
     if (PLAN.conflicts.length) {
       h += `<h2 style="color:var(--warn)">Needs your OK</h2><div class="card">`;
-      PLAN.conflicts.forEach(c=>{ h += `<div class="cf"><div><b>${esc(whenX(c.x))}</b> · ${esc(c.name)}<br>${esc(short(c.text, 120))}</div>
-        <div class="hint" style="margin-top:4px">This lands in quiet hours, and moving it would change a cook time.</div>
+      PLAN.conflicts.forEach(c=>{ h += `<div class="cf"><div><b>${esc(whenX(c.ms))}</b> · ${esc(c.name)}<br>${esc(short(c.text, 120))}</div>
+        <div class="hint" style="margin-top:4px">This hands-on step falls outside active hours. Move this recipe's ready-by, or approve it.</div>
         <button class="btn sm" type="button" data-act="approve" data-key="${esc(c.key)}" style="margin-top:8px">Approve</button></div>`; });
       h += `</div>`;
     }
@@ -594,6 +633,19 @@ function renderSetup(){
   h += shareHtml();
   h += boxHtml();
   main.innerHTML = h;
+}
+
+/* ---------- per-recipe ready-by ---------- */
+function rbHtml(r){
+  const I = PLAN.info[r.id] || {};
+  const open = r.readyBy || S.rbOpen === r.id;
+  let h = `<div class="rb"><div class="hint" style="margin:0 0 6px">Ready by</div>`;
+  if (open) h += `<div class="readyrow"><input type="datetime-local" step="300" data-rb="${r.id}" value="${r.readyBy ? dtLocal(r.readyBy) : ""}" aria-label="Ready by for ${esc(r.name)}"><button class="btn sm" type="button" data-act="rbSame" data-id="${r.id}">Same as meal</button></div>`;
+  else h += `<button class="btn sm" type="button" data-act="rbPick" data-id="${r.id}">Same as meal</button>`;
+  if (I.startMs) h += `<div class="when2">${r.readyBy ? "Ready " + whenX(I.endMs) + " · " : ""}Starts ${whenX(I.startMs)}</div>`;
+  const cf = (I.conflicts || []).filter(c=>!S.approved[c.key]);
+  if (cf.length) { const first = Math.min(...cf.map(c=>c.ms)); h += `<div class="warnline">${cf.length === 1 ? "1 hands-on step falls outside active hours, at " : cf.length + " hands-on steps fall outside active hours, starting "}${esc(whenX(first))}. Move the ready-by or approve them below.</div>`; }
+  return h + `</div>`;
 }
 
 /* ---------- recipe box ---------- */
@@ -660,28 +712,35 @@ function complete(B){ return blockIds(B).every(id=>S.done[id]); }
 function mins(n){ return fmtDur(Math.abs(Math.round(n))); }
 function statusHtml(i){
   const a = anchor(); if (!a) return "";
-  if (!S.startAt) return i===0 ? `<div class="status">Start this at <b>${fmt(a, true)}</b> to be ready at <b>${fmt(S.target, true)}</b>.</div>` : "";
-  if (!S.target) return "";
-  const proj = S.startAt + PLAN.total*60000, diff = (proj - S.target)/60000;
-  if (Math.abs(diff) < 3) return `<div class="status ok">On track for <b>${fmt(S.target)}</b>.</div>`;
-  if (diff > 0) return `<div class="status late">Started <b>${mins(diff)} late</b>. Projected ready ${fmt(proj)}.</div>`;
-  return `<div class="status ok">Started <b>${mins(diff)} early</b>. Projected ready ${fmt(proj)}. Hold finished food warm until ${fmt(S.target)}.</div>`;
+  const end = PLAN.endMs;
+  if (!S.startAt) return i===0 && end ? `<div class="status">Start this at <b>${whenX(a)}</b> to be ready at <b>${whenX(end)}</b>.</div>` : "";
+  if (!end) return "";
+  const proj = S.startAt + PLAN.total*60000, diff = (proj - end)/60000;
+  if (Math.abs(diff) < 3) return `<div class="status ok">On track for <b>${whenX(end)}</b>.</div>`;
+  if (diff > 0) return `<div class="status late">Started <b>${mins(diff)} late</b>. Projected ready ${whenX(proj)}.</div>`;
+  return `<div class="status ok">Started <b>${mins(diff)} early</b>. Projected ready ${whenX(proj)}. Hold finished food warm until ${whenX(end)}.</div>`;
 }
 function renderCook(){
   tl.style.display = ""; nav.style.display = "";
   const blocks = PLAN.blocks;
   if (!blocks.length) { S.view = "setup"; return render(); }
   const B = blocks[S.idx];
-  tl.innerHTML = blocks.map((x,i)=>`<button type="button" role="tab" aria-selected="${i===S.idx}" class="tl ${i===S.idx?"cur":""} ${complete(x)?"complete":""}" data-i="${i}">${label(x)}${complete(x)?" ✓":""}</button>`).join("");
+  const anc = anchor(), byDay = anc && PLAN.multiDay;
+  let lastDay = "";
+  tl.innerHTML = blocks.map((x,i)=>{
+    let head = "";
+    if (byDay) { const ms = anc + x.off*60000, dk = dayKey(ms); if (dk !== lastDay) { lastDay = dk; head = `<span class="tlday">${mdy(ms)}</span>`; } }
+    return head + `<button type="button" role="tab" aria-selected="${i===S.idx}" class="tl ${i===S.idx?"cur":""} ${complete(x)?"complete":""}" data-i="${i}">${byDay ? fmt(anc + x.off*60000) : label(x)}${complete(x)?" ✓":""}</button>`;
+  }).join("");
   const all = blockIds(B), n = all.filter(id=>S.done[id]).length;
   const a = anchor();
   const big = a ? fmt(a + B.off*60000) : rel(B.off);
   const dayNote = a && fmt(a + B.off*60000, true).split(" ")[1] !== "today" ? " · " + fmt(a + B.off*60000, true).split(" ").slice(1).join(" ") : "";
   const dayHead = a && PLAN.multiDay ? `<div class="dayh">${new Date(a + B.off*60000).toLocaleDateString([], {weekday:"long", month:"short", day:"numeric"})}</div>` : "";
-  let h = dayHead + `<div class="when"><div class="time">${big}</div><div class="count">Step ${S.idx+1} of ${blocks.length} · ${n}/${all.length} done${a ? " · "+rel(B.off)+" from start" : ""}${dayNote}${B.dur ? " · about "+fmtDur(B.dur) : ""}</div></div>
+  let h = dayHead + `<div class="when"><div class="time">${big}</div><div class="count">Step ${S.idx+1} of ${blocks.length} · ${n}/${all.length} done${a ? " · "+rel(B.off)+" from start" : ""}${PLAN.multiDay ? "" : dayNote}${B.dur ? " · about "+fmtDur(B.dur) : ""}</div></div>
     <div class="headline">${esc(B.headline)}</div>
     ${statusHtml(S.idx)}
-    ${B.conflicts.filter(c=>!S.approved[c.key]).map(c=>`<div class="status late"><b>Quiet hours.</b> This lands at ${esc(whenX(c.x))} and moving it would change a cook time. <button class="btn sm" type="button" data-act="approve" data-key="${esc(c.key)}" style="margin-top:8px">Approve</button></div>`).join("")}
+    ${B.conflicts.filter(c=>!S.approved[c.key]).map(c=>`<div class="status late"><b>Outside active hours.</b> This hands-on step lands at ${esc(whenX(c.ms))}. Move this recipe's ready-by, or approve it. <button class="btn sm" type="button" data-act="approve" data-key="${esc(c.key)}" style="margin-top:8px">Approve</button></div>`).join("")}
     <div class="progress"><div style="width:${all.length ? n/all.length*100 : 0}%"></div></div>`;
   B.groups.forEach(g=>{
     h += `<section class="group"><div class="tag" style="color:${g.color}"><i style="background:${g.color}"></i>${esc(g.label)}</div>`;
@@ -929,6 +988,8 @@ document.addEventListener("click", e=>{
     else if (act==="copyList") { const txt = listText(); (navigator.clipboard ? navigator.clipboard.writeText(txt) : Promise.reject()).then(()=>{ copyMsg = "Copied. Paste it into a note or a text."; render(); }, ()=>{ copyMsg = "Couldn't copy here. Long-press to select the list instead."; render(); }); }
     else if (act==="clearHave") { Object.keys(S.have).forEach(k=>sendCheck("have:"+k, false)); S.have = {}; save(); render(); }
     else if (act==="share") startShare();
+    else if (act==="rbPick" && r) { S.rbOpen = r.id; render(); const f = main.querySelector(`[data-rb="${r.id}"]`); if (f) { f.focus(); if (f.showPicker) try { f.showPicker(); } catch(e) {} } }
+    else if (act==="rbSame" && r) { delete r.readyBy; S.rbOpen = null; buildPlan(); save(); const y = window.scrollY; render(); window.scrollTo(0,y); }
     else if (act==="sendLink") sendLink();
     else if (act==="leaveShare") ask("Stop syncing this plan on this phone? It stays here as your own copy, and the other people keep theirs.", "Stop sharing", ()=>{ S.share = null; clearInterval(pollTimer); shareMsg = ""; save(); render(); });
     else if (act==="addLib") { const L = S.library.find(x=>x.id===id); if (L && addToMeal(L, 1)) { afterChange(); importMsg = `Added ${L.name} from your recipe box.`; importErr = false; render(); } }
@@ -983,6 +1044,12 @@ document.addEventListener("change", e=>{
     save(); const y = window.scrollY; render(); window.scrollTo(0,y); return;
   }
   if (el.id === "readyIn") { if (el.value) setReady(el.value); return; }
+  if (el.dataset.rb) {
+    const r = S.recipes.find(x=>x.id===el.dataset.rb); if (!r) return;
+    const t = el.value ? new Date(el.value).getTime() : NaN;
+    if (isNaN(t)) delete r.readyBy; else r.readyBy = t;
+    S.rbOpen = null; buildPlan(); save(); const y = window.scrollY; render(); window.scrollTo(0,y); return;
+  }
   if (el.id === "qOn" || el.id === "qFrom" || el.id === "qTo") {
     if (el.id === "qOn") S.quiet.on = el.checked; else if (el.value) S.quiet[el.id === "qFrom" ? "from" : "to"] = el.value;
     buildPlan(); save(); const y = window.scrollY; render(); window.scrollTo(0,y); return;
