@@ -126,6 +126,7 @@
   .shop .amt{flex:0 0 auto;color:var(--accent);font-weight:600;font-size:15px;text-align:right;max-width:45%}
   .shop .from{display:block;color:var(--muted);font-size:13px;margin-top:2px}
   .shop .have .amt{color:var(--muted)}
+  .gotit .nm{text-decoration:line-through;text-decoration-color:var(--muted);color:var(--muted)}
   .shop li.madeit{padding:9px 0;color:var(--muted)}
   .irow{display:flex;gap:12px;align-items:center;padding:9px 0;cursor:pointer}
   .irow input{appearance:none;-webkit-appearance:none;flex:0 0 24px;width:24px;height:24px;margin:0;border:2px solid var(--muted);border-radius:6px;display:grid;place-content:center;cursor:pointer}
@@ -804,7 +805,7 @@ function aisle(name, unit){
   if (HERBS.test(n) && !/\bfresh\b/.test(n) && (/\bdried\b/.test(n) || unit === "vol-small")) return "sp";
   if (/\b(powder|paprika|cumin|cinnamon|nutmeg|cayenne|allspice|coriander|turmeric|curry|garam masala|cardamom|bay lea|peppercorns?|pepper flakes|crushed red pepper|chili flakes|seasoning|spice|cloves ground|ground cloves|ground ginger|mustard seed|fennel seed|celery seed|caraway|sumac|za'?atar|star anise|smoked salt|msg)\b/.test(n)) return "sp";
   if (/\b(salt|black pepper|white pepper|ground pepper|cracked pepper)\b/.test(n) || /^ ?pepper ?$/.test(n) || /\bsalt and pepper\b/.test(n)) return "sp";
-  if (/\b(stock|broth|bouillon|demi|crushed tomato|diced tomato|stewed tomato|whole tomatoes|whole peeled|tomato paste|tomato sauce|marinara|passata|salsa|olives|pickles?|capers|roasted red pepper|coconut milk|evaporated milk|condensed milk|chipotles? in adobo|adobo|artichoke|soup|canned|tuna|anchov|sardine|pumpkin puree|refried|enchilada sauce|chiles? in|green chiles?|pimento)\b/.test(n) || unit === "can" || unit === "jar") return "cn";
+  if (/\b(stock|broth|bouillon|demi|crushed tomato\w*|diced tomato\w*|stewed tomato\w*|fire-roasted tomato\w*|whole tomatoes|whole peeled|tomato paste|tomato sauce|marinara|passata|salsa|olives|pickles?|capers|roasted red peppers?|coconut milk|evaporated milk|condensed milk|chipotles? in adobo|adobo|artichoke|soup|canned|tuna|anchov|sardine|pumpkin puree|refried|enchilada sauce|chiles? in|green chiles?|pimento)\b/.test(n) || unit === "can" || unit === "jar") return "cn";
   if (/\b(oil|vinegar|soy sauce|tamari|worcestershire|hot sauce|sriracha|ketchup|mayo|mayonnaise|honey|maple syrup|molasses|hoisin|fish sauce|oyster sauce|bbq sauce|barbecue sauce|jam|jelly|preserves|peanut butter|tahini|dijon|mustard|relish|liquid smoke|cooking spray|nonstick spray)\b/.test(n)) return "oc";
   if (/\b(flour|sugar|baking powder|baking soda|yeast|cornstarch|cocoa|chocolate chips|chocolate|vanilla|extract|cornmeal|shortening|gelatin|sprinkles|cream of tartar|powdered sugar|confectioners|corn syrup|pie crust|graham)\b/.test(n)) return "bg";
   if (/\b(pasta|spaghetti|penne|linguine|fettuccine|macaroni|rigatoni|orzo|lasagna|noodles?|rice|quinoa|couscous|lentils?|barley|farro|grits|oats|oatmeal|breadcrumbs?|bread crumbs|panko|croutons|stuffing mix|crackers?)\b/.test(n)) return "gr";
@@ -916,7 +917,8 @@ function shopList(){
 }
 function shopText(){
   const { secs, made } = shopList();
-  let t = secs.map(s=>s.title + "\n" + s.items.map(x=>"- " + x.label + (x.amount ? ": " + x.amount : "")).join("\n")).join("\n\n");
+  const need = x=>!x.sources.every(k=>S.have[k]);
+  let t = secs.map(s=>({ title:s.title, items:s.items.filter(need) })).filter(s=>s.items.length).map(s=>s.title + "\n" + s.items.map(x=>"- " + x.label + (x.amount ? ": " + x.amount : "")).join("\n")).join("\n\n");
   if (made.length) t += "\n\nMade in this plan (don't buy)\n" + made.map(m=>"- " + cap(m.name) + " (from " + m.from + ")").join("\n");
   return t;
 }
@@ -925,14 +927,17 @@ function renderShop(){
   const total = SHOP.length, have = SHOP.filter(x=>x.sources.every(k=>S.have[k])).length;
   let h = `<div class="top2"><div class="title">Shopping list</div><div class="meta">${have} of ${total} checked</div></div>
     <div class="hint" style="margin-top:6px">Combined across ${S.recipes.length} recipe${S.recipes.length===1?"":"s"} at their batch sizes and sorted by store section. Change batch sizes under By dish.</div>`;
-  secs.forEach(sec=>{
-    h += `<h2>${esc(sec.title)}</h2><div class="ings shop"><ul>`;
-    sec.items.forEach(x=>{
-      const idx = SHOP.indexOf(x), on = x.sources.every(k=>S.have[k]);
-      h += `<li style="padding:0"><label class="irow ${on?"have":""}"><input type="checkbox" data-shop="${idx}" ${on?"checked":""}><span class="nm">${esc(x.label)}${S.recipes.length > 1 ? `<span class="from">${esc(x.dishes.join(", "))}</span>` : ""}</span><span class="amt">${esc(x.amount)}</span></label></li>`;
-    });
-    h += `</ul></div>`;
-  });
+  /* Checked items drop to a Got it section at the bottom; unchecking puts them back in their aisle. */
+  const isOn = x=>x.sources.every(k=>S.have[k]);
+  const row = x=>{
+    const idx = SHOP.indexOf(x), on = isOn(x);
+    return `<li style="padding:0"><label class="irow ${on?"have":""}"><input type="checkbox" data-shop="${idx}" ${on?"checked":""} aria-label="${esc(x.label)}"><span class="nm">${esc(x.label)}${S.recipes.length > 1 ? `<span class="from">${esc(x.dishes.join(", "))}</span>` : ""}</span><span class="amt">${esc(x.amount)}</span></label></li>`;
+  };
+  const open = secs.map(sec=>({ title: sec.title, items: sec.items.filter(x=>!isOn(x)) })).filter(sec=>sec.items.length);
+  const got = SHOP.filter(isOn).sort((a,b)=>a.label.localeCompare(b.label));
+  if (!open.length && total) h += `<div class="status ok" style="margin-top:16px">Everything's checked off.</div>`;
+  open.forEach(sec=>{ h += `<h2>${esc(sec.title)}</h2><div class="ings shop"><ul>${sec.items.map(row).join("")}</ul></div>`; });
+  if (got.length) h += `<h2>Got it <span style="color:var(--muted);letter-spacing:0;text-transform:none;font:500 13px Inter,sans-serif">(${got.length}) Uncheck to put one back</span></h2><div class="ings shop gotit"><ul>${got.map(row).join("")}</ul></div>`;
   if (made.length) h += `<h2>Made in this plan</h2><div class="hint" style="margin-top:0">These come from other recipes in this meal, so they're left off the list.</div><div class="ings shop"><ul>${made.map(m=>`<li class="madeit"><span class="nm">${esc(cap(m.name))}<span class="from">For ${esc(m.for)}, from ${esc(m.from)}</span></span></li>`).join("")}</ul></div>`;
   return h;
 }
