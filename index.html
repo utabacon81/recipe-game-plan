@@ -119,6 +119,14 @@
   .ilist .meta{color:var(--muted);font-size:15px}
   .ilist h2{margin:26px 0 0}
   .ilist .batch{margin:10px 0}
+  .seg{display:flex;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:4px;gap:4px;margin-bottom:16px}
+  .seg button{flex:1;min-height:44px;border:none;border-radius:9px;background:none;color:var(--muted);font:600 15px Inter,sans-serif;cursor:pointer}
+  .seg button.on{background:var(--accent);color:#1E1C1A}
+  .shop .nm{flex:1;min-width:0}
+  .shop .amt{flex:0 0 auto;color:var(--accent);font-weight:600;font-size:15px;text-align:right;max-width:45%}
+  .shop .from{display:block;color:var(--muted);font-size:13px;margin-top:2px}
+  .shop .have .amt{color:var(--muted)}
+  .shop li.madeit{padding:9px 0;color:var(--muted)}
   .irow{display:flex;gap:12px;align-items:center;padding:9px 0;cursor:pointer}
   .irow input{appearance:none;-webkit-appearance:none;flex:0 0 24px;width:24px;height:24px;margin:0;border:2px solid var(--muted);border-radius:6px;display:grid;place-content:center;cursor:pointer}
   .irow input:checked{background:var(--done);border-color:var(--done)}
@@ -774,8 +782,164 @@ function restoreMeal(text){
   if (S.recipes.length) ask(`Replace the ${S.recipes.length} recipe${S.recipes.length===1?"":"s"} in this meal with the backup?`, "Replace", go); else go();
 }
 
+/* ---------- combined shopping list ----------
+   Merges like ingredients across every recipe at its batch size, adds amounts across units,
+   and sorts by store section. Checking a combined item checks every source line (S.have), so the
+   by-dish view and shared plans stay in step. */
+const VOL = { tsp:1, teaspoon:1, tbsp:3, tbs:3, tbl:3, tablespoon:3, cup:48, c:48, floz:6, pint:96, pt:96, quart:192, qt:192, gallon:768, gal:768, ml:0.2029, milliliter:0.2029, l:202.9, liter:202.9, litre:202.9 };
+const WT = { oz:1, ounce:1, lb:16, pound:16, g:0.035274, gram:0.035274, kg:35.274, kilogram:35.274 };
+const METRIC = new Set(["ml","milliliter","l","liter","litre","g","gram","kg","kilogram"]);
+const CONTAINERS = new Set(["can","jar","package","pkg","stick","clove","bunch","head","stalk","rib","slice","sprig","bag","bottle","box","envelope","sheet","fillet","link","container","pinch","dash","handful","piece","loaf","pan","batch","sleeve","carton"]);
+const COUNTWORDS = new Set(["large","medium","small","whole","extra","jumbo"]);
+const SHOP_DROP = /^(?:(?:cold|hot|warm|boiling|ice|tap|lukewarm|filtered)\s+)?water$|^ice(?: cubes)?$|^ice water$/;
+const SECTIONS = [
+  ["Produce", "pr"], ["Meat and Seafood", "mt"], ["Dairy and Eggs", "dy"], ["Bakery", "bk"], ["Canned and Jarred", "cn"],
+  ["Pasta, Rice and Beans", "gr"], ["Baking", "bg"], ["Spices", "sp"], ["Oils and Condiments", "oc"], ["Frozen", "fz"],
+  ["Beer, Wine and Spirits", "al"], ["Other", "ot"]
+];
+const HERBS = /\b(thyme|rosemary|oregano|basil|parsley|cilantro|dill|mint|sage|tarragon|chives|marjoram)\b/;
+function aisle(name, unit){
+  const n = " " + name + " ";
+  if (/\bfrozen\b/.test(n)) return "fz";
+  if (HERBS.test(n) && !/\bfresh\b/.test(n) && (/\bdried\b/.test(n) || unit === "vol-small")) return "sp";
+  if (/\b(powder|paprika|cumin|cinnamon|nutmeg|cayenne|allspice|coriander|turmeric|curry|garam masala|cardamom|bay lea|peppercorns?|pepper flakes|crushed red pepper|chili flakes|seasoning|spice|cloves ground|ground cloves|ground ginger|mustard seed|fennel seed|celery seed|caraway|sumac|za'?atar|star anise|smoked salt|msg)\b/.test(n)) return "sp";
+  if (/\b(salt|black pepper|white pepper|ground pepper|cracked pepper)\b/.test(n) || /^ ?pepper ?$/.test(n) || /\bsalt and pepper\b/.test(n)) return "sp";
+  if (/\b(stock|broth|bouillon|demi|crushed tomato|diced tomato|stewed tomato|whole tomatoes|whole peeled|tomato paste|tomato sauce|marinara|passata|salsa|olives|pickles?|capers|roasted red pepper|coconut milk|evaporated milk|condensed milk|chipotles? in adobo|adobo|artichoke|soup|canned|tuna|anchov|sardine|pumpkin puree|refried|enchilada sauce|chiles? in|green chiles?|pimento)\b/.test(n) || unit === "can" || unit === "jar") return "cn";
+  if (/\b(oil|vinegar|soy sauce|tamari|worcestershire|hot sauce|sriracha|ketchup|mayo|mayonnaise|honey|maple syrup|molasses|hoisin|fish sauce|oyster sauce|bbq sauce|barbecue sauce|jam|jelly|preserves|peanut butter|tahini|dijon|mustard|relish|liquid smoke|cooking spray|nonstick spray)\b/.test(n)) return "oc";
+  if (/\b(flour|sugar|baking powder|baking soda|yeast|cornstarch|cocoa|chocolate chips|chocolate|vanilla|extract|cornmeal|shortening|gelatin|sprinkles|cream of tartar|powdered sugar|confectioners|corn syrup|pie crust|graham)\b/.test(n)) return "bg";
+  if (/\b(pasta|spaghetti|penne|linguine|fettuccine|macaroni|rigatoni|orzo|lasagna|noodles?|rice|quinoa|couscous|lentils?|barley|farro|grits|oats|oatmeal|breadcrumbs?|bread crumbs|panko|croutons|stuffing mix|crackers?)\b/.test(n)) return "gr";
+  if (/\b(beans?|chickpeas|black-eyed peas)\b/.test(n) && !/\b(green|fresh|snap|string|wax|fava|edamame)\b/.test(n)) return /\b(dried|dry)\b/.test(n) || unit === "wt" ? "gr" : "cn";
+  if (/\b(bread|rolls?|buns?|baguette|tortillas?|pita|brioche|croissants?|sourdough|naan|english muffins?|bagels?|loaf)\b/.test(n)) return "bk";
+  if (/\b(milk|buttermilk|cream|half and half|half-and-half|butter|ghee|cheese|cheddar|parmesan|parmigiano|mozzarella|ricotta|feta|gruy[eè]re|provolone|fontina|pecorino|jack|brie|goat cheese|mascarpone|yogurt|sour cream|cr[eè]me fra[iî]che|eggs?|egg yolks?|egg whites?)\b/.test(n)) return "dy";
+  if (/\b(beef|pork|chicken|turkey|lamb|veal|duck|sausage|bacon|ham|prosciutto|pancetta|chorizo|salami|pepperoni|steaks?|tenderloin|brisket|ribs|chuck|sirloin|ribeye|short rib|roast|loin|shoulder|thighs?|breasts?|wings?|drumsticks?|ground|bones?|marrow|oxtail|shrimp|prawns?|salmon|cod|halibut|tilapia|fish|crab|lobster|scallops?|clams?|mussels?|oysters?)\b/.test(n)) return "mt";
+  if (/\b(wine|beer|ale|lager|stout|bourbon|whiskey|whisky|brandy|cognac|vodka|rum|tequila|sherry|port|vermouth|marsala|sake|mirin|liqueur|champagne|prosecco)\b/.test(n)) return "al";
+  if (/\b(onions?|garlic|shallots?|leeks?|scallions?|green onions?|potatoes?|yukon|russet|carrots?|celery|peppers?|jalape[nñ]os?|poblanos?|serranos?|habaneros?|tomato(es)?|lettuce|spinach|kale|chard|arugula|cabbage|broccoli|cauliflower|zucchini|squash|cucumbers?|mushrooms?|asparagus|green beans|corn|avocados?|lemons?|limes?|oranges?|apples?|bananas?|berries|strawberr|blueberr|raspberr|grapes?|ginger|radish|beets?|sweet potato|yams?|eggplant|peas|fennel|herbs?|parsnips?|turnips?|okra|bok choy|sprouts|cranberr|pears?|peaches|mango|pineapple|cherries)\b/.test(n) || HERBS.test(n) || /\bfresh\b/.test(n)) return "pr";
+  return "ot";
+}
+function amtOf(raw, k){
+  const clean = decode(raw).replace(/\([^)]*\)/g, " ").replace(/\s+/g, " ").trim();
+  const m = clean.match(LEAD_QTY);
+  if (!m) return null;
+  let v = (m[4] ? numVal(m[4]) : numVal(m[2])) * k;
+  if (!isFinite(v) || v <= 0) return null;
+  let w = (m[6] || "").replace(/\.$/, ""), after = clean.slice(m[0].length);
+  if (/^fl$/i.test(w) && /^\s*oz\b/i.test(after)) w = "floz";
+  const low = w.toLowerCase(), base = low === "t" ? (w === "T" ? "tbsp" : "tsp") : sing(low);
+  if (VOL[base] != null) return { dim:"vol", v: v * VOL[base], metric: METRIC.has(base), small: base === "tsp" || base === "tbsp" || base === "teaspoon" || base === "tablespoon" };
+  if (WT[base] != null) return { dim:"wt", v: v * WT[base], metric: METRIC.has(base) };
+  if (CONTAINERS.has(base)) return { dim:base, v };
+  return { dim:"ct", v };
+}
+function shopKey(name){
+  return name.toLowerCase().replace(/[^a-z0-9\s'-]/g, " ").split(/\s+/).filter(w=>w && !/^(fresh|large|small|medium|ripe|jumbo|extra-large|good|quality|about|cold|chilled|softened|melted|room|temperature|ice-cold)$/.test(w)).map(sing).join(" ").trim();
+}
+function plainWords(t){ return t.toLowerCase().replace(/[^a-z0-9\s-]/g, " ").split(/\s+/).filter(w=>w.length > 2 && !STOP.has(w)).map(sing); }
+/* An ingredient that an earlier recipe in this meal makes (demi-glace, bordelaise base, prepped potatoes).
+   Only recipes that finish before this one count, so raw ingredients in a Prep recipe aren't mistaken
+   for the output of the Finish recipe that shares its name. Picks the latest such recipe. */
+function readyOf(r){ return r.readyBy || S.target || 0; }
+function madeIn(r, name, raw){
+  const prepped = /\b(prepped|homemade|reserved|prepared|made-ahead|made ahead|bagged|portioned)\b/i.test(raw);
+  const ws = plainWords(name).filter(w=>!/^(quart|cup|pan|batch|bag|bagged|portioned|prepped|homemade|reserved|prepared)$/.test(w));
+  if (!ws.length) return null;
+  const mine = readyOf(r), idx = S.recipes.indexOf(r);
+  const cands = S.recipes.filter((o,oi)=>o.id !== r.id && (readyOf(o) < mine || (readyOf(o) === mine && oi < idx && prepped)));
+  const hits = cands.filter(o=>{
+    const on = new Set(plainWords(o.name));
+    const shared = ws.filter(w=>on.has(w));
+    return shared.length >= 2 || (shared.length === 1 && (prepped || (ws.length === 1 && (ws[0].length >= 8 || ws[0].includes("-")))));
+  }).sort((a,b)=>readyOf(b) - readyOf(a));
+  if (hits.length) return hits[0];
+  if (prepped && /\b(prepped|homemade|reserved)\b/i.test(raw) && cands.length) return { name:"earlier in this plan" };
+  return null;
+}
+function fmtVol(v, metric){
+  if (metric) return v / 0.2029 >= 1000 ? qtyStr(v / 202.9) + " l" : qtyStr(v / 0.2029) + " ml";
+  if (v >= 192) return qtyStr(v / 192) + " qt";
+  const c = v / 48, nice = [0.25, 1/3, 0.5, 2/3, 0.75].some(f=>Math.abs(c - f) < 0.01);
+  if (v >= 48 || (v >= 12 && nice)) return qtyStr(c) + (c > 1.001 ? " cups" : " cup");
+  if (v >= 3) return qtyStr(v / 3) + " tbsp";
+  return qtyStr(v) + " tsp";
+}
+function fmtWt(v, metric){
+  if (metric) return v / 0.035274 >= 1000 ? qtyStr(v / 35.274) + " kg" : Math.round(v / 0.035274) + " g";
+  return v >= 16 ? qtyStr(v / 16) + " lb" : qtyStr(v) + " oz";
+}
+function plu(u, v){ return v > 1.001 ? (/(sh|ch|x|s)$/.test(u) ? u + "es" : u + "s") : u; }
+let SHOP = [];
+function shopList(){
+  const groups = new Map(), made = [];
+  S.recipes.forEach(r=>{
+    const k = r.k || 1;
+    r.ings.forEach((raw, i)=>{
+      const p = parseIng(raw);
+      let name = p.name.replace(/\b(and|or)\s*$/,"").trim();
+      if (!name || SHOP_DROP.test(name)) return;
+      let a = amtOf(raw, k);
+      /* "2 garlic cloves" counts cloves of garlic. */
+      if (a && a.dim === "ct") { const ws = name.split(" "), last = sing(ws[ws.length-1] || ""); if (ws.length > 1 && CONTAINERS.has(last)) { a = { dim:last, v:a.v }; name = ws.slice(0,-1).join(" "); } }
+      const src = r.id + ":" + i;
+      const m = madeIn(r, name, raw);
+      if (m) { made.push({ name, from: m.name, for: r.name, src }); return; }
+      const key = shopKey(name) || name;
+      if (!groups.has(key)) groups.set(key, { key, name, amts:{}, metric:{}, small:true, loose:false, dishes:[], sources:[], unit:null });
+      const g = groups.get(key);
+      if (!g.dishes.includes(r.name)) g.dishes.push(r.name);
+      g.sources.push(src);
+      if (!a) { g.loose = true; return; }
+      g.amts[a.dim] = (g.amts[a.dim] || 0) + a.v;
+      if (a.dim === "vol" || a.dim === "wt") g.metric[a.dim] = g.metric[a.dim] === undefined ? a.metric : (g.metric[a.dim] && a.metric);
+      if (a.dim === "vol" && !a.small) g.small = false;
+      if (!g.unit) g.unit = a.dim;
+      if (a.dim === "ct" && a.v > 1 && !/s$/.test(g.name) && /s$/.test(name)) g.name = name;
+    });
+  });
+  const items = [...groups.values()].map(g=>{
+    const parts = [];
+    if (g.amts.ct) parts.push(qtyStr(g.amts.ct));
+    Object.keys(g.amts).filter(d=>CONTAINERS.has(d)).forEach(d=>parts.push(qtyStr(g.amts[d]) + " " + plu(d, g.amts[d])));
+    if (g.amts.wt) parts.push(fmtWt(g.amts.wt, g.metric.wt));
+    if (g.amts.vol && /^(unsalted |salted )?butter$/.test(g.key) && !g.metric.vol) {
+      /* Butter is bought by the stick: 1 stick = 8 tbsp = 24 tsp. */
+      const st = g.amts.vol / 24 + (g.amts.wt ? g.amts.wt / 4 : 0) + (g.amts.stick || 0);
+      parts.length = 0; if (g.amts.ct) parts.push(qtyStr(g.amts.ct));
+      parts.push(qtyStr(st) + (st > 1.001 ? " sticks" : " stick") + (st >= 4 ? " (" + qtyStr(st / 4) + " lb)" : ""));
+    }
+    else if (g.amts.vol) parts.push(fmtVol(g.amts.vol, g.metric.vol));
+    if (g.loose) parts.push(parts.length ? "plus more" : "as needed");
+    const u = g.unit === "vol" ? (g.small ? "vol-small" : "vol") : g.unit;
+    return { label: cap(g.name), amount: parts.join(" + "), dishes: g.dishes, sources: g.sources, sec: aisle(g.name.toLowerCase(), u) };
+  });
+  SHOP = items;
+  const secs = SECTIONS.map(([title, id])=>({ title, items: items.filter(x=>x.sec === id).sort((a,b)=>a.label.localeCompare(b.label)) })).filter(s=>s.items.length);
+  return { secs, made };
+}
+function shopText(){
+  const { secs, made } = shopList();
+  let t = secs.map(s=>s.title + "\n" + s.items.map(x=>"- " + x.label + (x.amount ? ": " + x.amount : "")).join("\n")).join("\n\n");
+  if (made.length) t += "\n\nMade in this plan (don't buy)\n" + made.map(m=>"- " + cap(m.name) + " (from " + m.from + ")").join("\n");
+  return t;
+}
+function renderShop(){
+  const { secs, made } = shopList();
+  const total = SHOP.length, have = SHOP.filter(x=>x.sources.every(k=>S.have[k])).length;
+  let h = `<div class="top2"><div class="title">Shopping list</div><div class="meta">${have} of ${total} checked</div></div>
+    <div class="hint" style="margin-top:6px">Combined across ${S.recipes.length} recipe${S.recipes.length===1?"":"s"} at their batch sizes and sorted by store section. Change batch sizes under By dish.</div>`;
+  secs.forEach(sec=>{
+    h += `<h2>${esc(sec.title)}</h2><div class="ings shop"><ul>`;
+    sec.items.forEach(x=>{
+      const idx = SHOP.indexOf(x), on = x.sources.every(k=>S.have[k]);
+      h += `<li style="padding:0"><label class="irow ${on?"have":""}"><input type="checkbox" data-shop="${idx}" ${on?"checked":""}><span class="nm">${esc(x.label)}${S.recipes.length > 1 ? `<span class="from">${esc(x.dishes.join(", "))}</span>` : ""}</span><span class="amt">${esc(x.amount)}</span></label></li>`;
+    });
+    h += `</ul></div>`;
+  });
+  if (made.length) h += `<h2>Made in this plan</h2><div class="hint" style="margin-top:0">These come from other recipes in this meal, so they're left off the list.</div><div class="ings shop"><ul>${made.map(m=>`<li class="madeit"><span class="nm">${esc(cap(m.name))}<span class="from">For ${esc(m.for)}, from ${esc(m.from)}</span></span></li>`).join("")}</ul></div>`;
+  return h;
+}
+
 /* ---------- shopping list ---------- */
 function listText(){
+  if ((S.listMode || "shop") === "shop") return shopText();
   return S.recipes.map(r=>{
     const head = r.name + ((r.k||1)!==1 ? " (" + r.k + "x)" : "");
     return head + "\n" + r.ings.map(i=>"- " + scaleLine(i, r.k||1)).join("\n");
@@ -784,10 +948,13 @@ function listText(){
 let copyMsg = "";
 function renderList(){
   tl.innerHTML = ""; tl.style.display = "none"; nav.style.display = "none";
+  const mode = S.listMode || "shop";
   const total = S.recipes.reduce((a,r)=>a + r.ings.length, 0);
   const have = S.recipes.reduce((a,r)=>a + r.ings.filter((_,i)=>S.have[r.id+":"+i]).length, 0);
-  let h = `<div class="ilist"><div class="top2"><div class="title">Shopping list</div><div class="meta">${have} of ${total} checked</div></div>`;
-  S.recipes.forEach(r=>{
+  let h = `<div class="ilist"><div class="seg" role="tablist"><button type="button" role="tab" aria-selected="${mode==="shop"}" class="${mode==="shop"?"on":""}" data-act="listMode" data-m="shop">Shopping list</button><button type="button" role="tab" aria-selected="${mode==="dish"}" class="${mode==="dish"?"on":""}" data-act="listMode" data-m="dish">By dish</button></div>`;
+  if (mode === "shop") h += renderShop();
+  else h += `<div class="top2"><div class="title">By dish</div><div class="meta">${have} of ${total} checked</div></div>`;
+  if (mode === "dish") S.recipes.forEach(r=>{
     h += `<h2 style="color:${r.color}">${esc(r.name)}</h2>
       <div class="batch" role="group" aria-label="Batch size for ${esc(r.name)}">${BATCHES.map(b=>`<button type="button" class="${(r.k||1)===b?"on":""}" data-act="batch" data-id="${r.id}" data-k="${b}">${b===0.5?"½":b}x</button>`).join("")}</div>
       <div class="ings" style="--c:${r.color}"><ul>`;
@@ -1221,6 +1388,7 @@ document.addEventListener("click", e=>{
     }
     else if (act==="batch" && r) { r.k = +t.dataset.k; syncLib(r); buildPlan(); save(); const y = window.scrollY; render(); window.scrollTo(0,y); }
     else if (act==="list") { S.view = "list"; copyMsg = ""; save(); render(); window.scrollTo(0,0); }
+    else if (act==="listMode") { S.listMode = t.dataset.m; copyMsg = ""; save(); render(); window.scrollTo(0,0); }
     else if (act==="copyList") { const txt = listText(); (navigator.clipboard ? navigator.clipboard.writeText(txt) : Promise.reject()).then(()=>{ copyMsg = "Copied. Paste it into a note or a text."; render(); }, ()=>{ copyMsg = "Couldn't copy here. Long-press to select the list instead."; render(); }); }
     else if (act==="clearHave") { Object.keys(S.have).forEach(k=>sendCheck("have:"+k, false)); S.have = {}; save(); render(); }
     else if (act==="share") startShare();
@@ -1295,6 +1463,11 @@ document.addEventListener("change", e=>{
   if (el.matches("input[data-id]")) {
     if (el.checked) S.done[el.dataset.id] = true; else delete S.done[el.dataset.id];
     sendCheck(el.dataset.id, el.checked);
+    save(); const y = window.scrollY; render(); window.scrollTo(0,y); return;
+  }
+  if (el.matches("input[data-shop]")) {
+    const x = SHOP[+el.dataset.shop]; if (!x) return;
+    x.sources.forEach(k=>{ if (el.checked) S.have[k] = true; else delete S.have[k]; sendCheck("have:" + k, el.checked); });
     save(); const y = window.scrollY; render(); window.scrollTo(0,y); return;
   }
   if (el.matches("input[data-have]")) {
