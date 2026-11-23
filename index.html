@@ -773,6 +773,7 @@ function restoreMeal(text){
     return setMealMsg(data && Array.isArray(data.library) ? "That's a recipe box backup. Restore it in the recipe box section below." : "That doesn't look like a meal backup.", true);
   }
   const go = ()=>{
+    const savedDone = Object.assign({}, S.done);
     S.recipes = JSON.parse(JSON.stringify(m.recipes));
     const used = new Set();
     S.recipes.forEach(r=>{
@@ -785,7 +786,16 @@ function restoreMeal(text){
     if (m.quiet) S.quiet = m.quiet;
     S.approved = m.approved || {};
     S.open = {}; S.rbOpen = null;
-    afterChange();
+    /* Unlike a recipe edit, a restore keeps step checks: any saved check whose task (recipe id and step)
+       still exists in the rebuilt plan is put back. Checks for tasks that are gone are dropped, and in a
+       shared plan they're unchecked one by one so the other phones match. */
+    buildPlan();
+    const live = new Set();
+    PLAN.blocks.forEach(B=>B.groups.forEach(g=>g.tasks.forEach(t=>live.add(t[0]))));
+    S.done = {};
+    Object.keys(savedDone).forEach(k=>{ if (!savedDone[k]) return; if (live.has(k)) S.done[k] = true; else sendCheck(k, false); });
+    S.idx = 0; S.startAt = null;
+    save();
     mealRestoreOpen = false;
     const past = PLAN.startMs && PLAN.startMs < Date.now();
     setMealMsg(`Restored ${S.recipes.length} recipe${S.recipes.length===1?"":"s"}.` + (past ? " This plan's dates are in the past. Set a new eat time above and you can move every ready-by with it." : ""), false);
