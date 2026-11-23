@@ -446,7 +446,7 @@ function recipeSchedule(r, ctx){
     blocks.push({ x:b, dur:0, kind:"advance", ings:[{ raw:scaleLine(p.raw, k), prepped:false, again:false }], key,
       tasks:[[r.id+":a:"+p.i, "Start ahead. " + cap(p.name) + ": " + p.prep, "Needs about " + fmtDur(dur) + " before it's used." + note]] });
   });
-  if (!servedInSteps) blocks.push({ x:0, dur:0, kind:"serve", ings:[], tasks:[[r.id+":s","Plate and serve",""]] });
+  if (!servedInSteps) blocks.push({ x:0, dur:0, kind:"serve", ings:[], tasks:[[r.id+":s", isPrepRecipe(r) ? "Done for now. Store as directed." : "Plate and serve", ""]] });
   const pitems = prepItems(r);
   const pm = pitems.length ? prepMin(r) : 0;
   return {
@@ -468,6 +468,8 @@ function batchNote(t, k){
    Recipes that share a ready-by share one prep block, right before the first of them starts cooking.
    Positions are minutes relative to the plan reference G (the meal ready-by, or the latest recipe ready-by). */
 let PLAN = { total:0, blocks:[], conflicts:[], notes:[], multiDay:false, start:0, startMs:null, endMs:null, info:{} };
+/* A recipe with its own ready-by that finishes before the meal (stock, demi, make-ahead sides). */
+function isPrepRecipe(r){ const G = planRef(); return !!r.readyBy && !!G && r.readyBy < G; }
 function planRef(){ const ends = S.recipes.map(r=>r.readyBy).filter(Boolean); return S.target || (ends.length ? Math.max(...ends) : null); }
 function buildPlan(){
   const G = planRef();
@@ -515,7 +517,15 @@ function buildPlan(){
   });
   const blocks = [...byOff.values()].sort((a,b)=>a.off-b.off);
   blocks.forEach(B=>{
-    if (B.kinds.size===1 && B.kinds.has("serve")) B.headline = B.off === Math.round(endX - start) ? "Ready. Plate and serve." : B.groups.map(g=>g.label).join(" + ") + (B.groups.length > 1 ? " are" : " is") + " ready.";
+    if (B.kinds.size===1 && B.kinds.has("serve")) {
+      if (B.off === Math.round(endX - start)) B.headline = "Ready. Plate and serve.";
+      else {
+        /* Prep recipes are done (they get stored); anything else ending here is ready. */
+        const prepIds = new Set(S.recipes.filter(isPrepRecipe).map(r=>r.id));
+        const done = B.groups.filter(g=>prepIds.has(g.rid)).map(g=>g.label), ready = B.groups.filter(g=>!prepIds.has(g.rid)).map(g=>g.label);
+        B.headline = [[done, "done"], [ready, "ready"]].filter(([n])=>n.length).map(([n, w])=>n.join(" + ") + (n.length > 1 ? " are " : " is ") + w + ".").join(" ");
+      }
+    }
     else if (B.kinds.has("prep")) B.headline = "Prep work. Get everything cut and measured.";
     else if (B.groups.length > 1) B.headline = B.groups.map(g=>g.label).join(" + ");
     else B.headline = short(B.groups[0].tasks[0][1], 90);
