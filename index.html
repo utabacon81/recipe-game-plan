@@ -149,6 +149,14 @@
   .rb .readyrow input{font-size:15px}
   .rb .when2{color:var(--muted);font-size:14px;margin-top:6px;line-height:1.45}
   .warnline{color:#F0A99D;font-size:14px;margin-top:8px;line-height:1.45}
+  .who{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:14px 0 4px}
+  .who span{color:var(--muted);font-size:14px;margin-right:2px}
+  .who button{min-height:38px;border-radius:19px;border:1px solid var(--line);background:none;color:var(--text);font:600 14px Inter,sans-serif;padding:0 14px;cursor:pointer}
+  .who button[style]{border-color:color-mix(in srgb, var(--oc) 55%, var(--line))}
+  .who button.on{background:var(--accent);border-color:var(--accent);color:#1E1C1A}
+  .who button.on[style]{background:var(--oc);border-color:var(--oc)}
+  .own{display:inline-block;vertical-align:1px;margin-right:8px;padding:1px 8px;border-radius:9px;font:700 12px Inter,sans-serif;letter-spacing:.3px;color:#1E1C1A;background:var(--oc)}
+  .hidnote{color:var(--muted);font-size:13px;margin:4px 0 0 36px}
   .dayh{font:600 14px Oswald,sans-serif;letter-spacing:2px;text-transform:uppercase;color:var(--done);margin-bottom:6px}
   #banner{position:fixed;left:12px;right:12px;top:12px;z-index:20;display:none}
   #banner .bn{max-width:696px;margin:0 auto;background:var(--panel);border:2px solid var(--accent);border-radius:14px;padding:14px;font-size:15px;line-height:1.45;box-shadow:0 10px 30px rgba(0,0,0,.5)}
@@ -422,7 +430,9 @@ function recipeSchedule(r, ctx){
       if (!again) firstSeen[ii] = s.si;
       ings.push({ raw: again ? p.name : scaleLine(p.raw, k), prepped: !again && !!p.prep, again });
     });
-    const tasks = s.real.map((x,ti)=>[r.id+":"+s.si+":"+ti, scaleText(x.t, k), [x.timed ? "About "+fmtDur(x.m) : "", batchNote(x.t, k)].filter(Boolean).join(" ")]);
+    /* "Aaron: ..." at the start of a step makes Aaron the owner of every task in it; a later sentence can name its own. */
+    const stepOwner = splitOwner(r.steps[s.si].sents[0] ? r.steps[s.si].sents[0].t : "")[0];
+    const tasks = s.real.map((x,ti)=>{ const [own, txt] = splitOwner(x.t); return [r.id+":"+s.si+":"+ti, scaleText(txt, k), [x.timed ? "About "+fmtDur(x.m) : "", batchNote(txt, k)].filter(Boolean).join(" "), own || stepOwner]; });
     if (s.note && tasks.length) { const t = tasks[tasks.length-1]; t[2] = [t[2] ? t[2].replace(/\.?$/, ".") : "", s.note].filter(Boolean).join(" "); }
     blocks.push({ x:s.b, dur:s.e - s.b, kind:"step", si:s.si, ings, tasks, key:r.id+":"+s.si });
   });
@@ -430,7 +440,7 @@ function recipeSchedule(r, ctx){
   let pk = 0;
   r.steps.forEach((st,si)=>st.sents.filter(x=>x.pre).forEach(x=>{
     const oven = steps.find(s=>s.si > si && /\b(bake|roast|oven|broil)\b/i.test(s.text)) || steps.find(s=>s.si >= si);
-    blocks.push({ x:(oven ? oven.b : 0) - 15, dur:0, kind:"preheat", ings:[], tasks:[[r.id+":h:"+(pk++), x.t, "Most ovens need about 15 minutes to heat."]] });
+    blocks.push({ x:(oven ? oven.b : 0) - 15, dur:0, kind:"preheat", ings:[], tasks:[(()=>{ const [own, txt] = splitOwner(x.t); return [r.id+":h:"+(pk++), txt, "Most ovens need about 15 minutes to heat.", own || splitOwner(st.sents[0] ? st.sents[0].t : "")[0]]; })()] });
   }));
   /* Advance work from ingredient lines runs alongside, finishing before the step that uses it. */
   advItems(r).forEach(p=>{
@@ -468,6 +478,25 @@ function batchNote(t, k){
    Recipes that share a ready-by share one prep block, right before the first of them starts cooking.
    Positions are minutes relative to the plan reference G (the meal ready-by, or the latest recipe ready-by). */
 let PLAN = { total:0, blocks:[], conflicts:[], notes:[], multiDay:false, start:0, startMs:null, endMs:null, info:{} };
+/* ---------- step owners ----------
+   A step that starts with a name and a colon ("Aaron: sear the steaks") belongs to that person.
+   Section labels that look the same ("Sauce:", "Note:") are not names. */
+const OWNER_RE = /^\s*([A-Z][A-Za-z'’.-]{1,19}(?:\s[A-Z][A-Za-z'’.-]{1,19})?)\s*:\s+(?=\S)/;
+const OWNER_STOP = new Set("note notes tip tips optional option options step make ahead sauce sauces dressing marinade garnish garnishes topping toppings assembly assemble serve serving servings to prep cook cooking bake baking filling glaze crust dough batter rub brine variation variations warning important storage store day meanwhile finish finishing for the base gravy stuffing salad sides side main mains dessert desserts glaze icing frosting crumble streusel broth stock roast sear rest chill reheat oven stovetop grill slow cooker instant pot equipment yield yields time total active hands on method directions instructions ingredients".split(" "));
+function splitOwner(t){
+  const m = String(t || "").match(OWNER_RE);
+  if (!m) return [null, t];
+  const name = m[1].trim();
+  if (name.split(/\s+/).some(w=>OWNER_STOP.has(w.toLowerCase().replace(/[^a-z]/g,"")))) return [null, t];
+  return [name, t.slice(m[0].length)];
+}
+const OWNER_COLORS = ["#7FB5A8", "#C9A0DC", "#E8C468", "#8FB3E8", "#E89A8F", "#A8C97F", "#F0A0C0", "#B8B0A0"];
+function planOwners(){ const set = new Set(); PLAN.blocks.forEach(B=>B.groups.forEach(g=>g.tasks.forEach(t=>{ if (t[3]) set.add(t[3]); }))); return [...set].sort((a,b)=>a.localeCompare(b)); }
+function ownerColor(name){ const all = planOwners(); const i = all.indexOf(name); return OWNER_COLORS[(i < 0 ? 0 : i) % OWNER_COLORS.length]; }
+/* Per-device choice (lives in this phone's state, never in the shared plan or a backup). */
+function showWho(){ const w = S.showWho || "all"; return w === "all" || planOwners().includes(w) ? w : "all"; }
+function taskShown(t){ const w = showWho(); return w === "all" || !t[3] || t[3] === w; }
+
 /* A recipe with its own ready-by that finishes before the meal (stock, demi, make-ahead sides). */
 function isPrepRecipe(r){ const G = planRef(); return !!r.readyBy && !!G && r.readyBy < G; }
 function planRef(){ const ends = S.recipes.map(r=>r.readyBy).filter(Boolean); return S.target || (ends.length ? Math.max(...ends) : null); }
@@ -1031,16 +1060,26 @@ function renderCook(){
     ${statusHtml(S.idx)}
     ${B.conflicts.filter(c=>!S.approved[c.key]).map(c=>`<div class="status late"><b>Outside your available hours.</b> This hands-on step lands at ${esc(whenX(c.ms))}. Move this recipe's ready-by, or approve it. <button class="btn sm" type="button" data-act="approve" data-key="${esc(c.key)}" style="margin-top:8px">Approve</button></div>`).join("")}
     <div class="progress"><div style="width:${all.length ? n/all.length*100 : 0}%"></div></div>`;
+  const owners = planOwners(), who = showWho();
+  if (owners.length) h += `<div class="who" role="group" aria-label="Show tasks for"><span>Show</span>${["all", ...owners].map(o=>`<button type="button" class="${who===o?"on":""}" data-act="showWho" data-who="${esc(o)}" ${o!=="all" ? `style="--oc:${ownerColor(o)}"` : ""}>${o==="all" ? "Everyone" : esc(o)}</button>`).join("")}</div>`;
+  const hidden = B.groups.reduce((a,g)=>a + g.tasks.filter(t=>!taskShown(t)).length, 0);
+  const shownAny = B.groups.some(g=>g.tasks.some(taskShown));
+  if (!shownAny) h += `<div class="note"><b>Nothing for ${esc(who)} at this time.</b> ${hidden} task${hidden===1?"":"s"} for others. Tap Everyone to see them.</div>`;
   B.groups.forEach(g=>{
+    if (!g.tasks.some(taskShown)) return;
     h += `<section class="group"><div class="tag" style="color:${g.color}"><i style="background:${g.color}"></i>${esc(g.label)}</div>`;
     if (g.ings.length) {
       h += `<div class="ings" style="--c:${g.color}"><h4>You'll need</h4><ul>` + g.ings.map(x=>
         `<li class="${x.again?"again":""}">${esc(x.raw)}${x.prepped ? `<span class="badge p">prepped</span>` : ""}${x.again ? `<span class="badge a">again</span>` : ""}</li>`).join("") + `</ul></div>`;
     }
     g.tasks.forEach(t=>{
+      if (!taskShown(t)) return;
       const on = !!S.done[t[0]];
-      h += `<label class="task ${on?"checked":""}"><input type="checkbox" data-id="${esc(t[0])}" ${on?"checked":""}><div><div class="t">${esc(t[1])}</div>${t[2] ? `<div class="d">${esc(t[2])}</div>` : ""}</div></label>`;
+      const chip = t[3] ? `<span class="own" style="--oc:${ownerColor(t[3])}">${esc(t[3])}</span>` : "";
+      h += `<label class="task ${on?"checked":""}"><input type="checkbox" data-id="${esc(t[0])}" ${on?"checked":""}><div><div class="t">${chip}${esc(t[1])}</div>${t[2] ? `<div class="d">${esc(t[2])}</div>` : ""}</div></label>`;
     });
+    const gh = g.tasks.filter(t=>!taskShown(t)).length;
+    if (gh) h += `<div class="hidnote">${gh} more for others</div>`;
     h += `</section>`;
   });
   if (S.idx === 0 && !S.startAt) h += `<button class="big" type="button" data-act="start">Start the clock · I'm starting now</button>`;
@@ -1206,7 +1245,7 @@ function blockWho(B){ return B.groups.map(g=>g.label).join(" + "); }
 function alertItems(){
   const a = anchor(); if (!a) return [];
   const now = Date.now();
-  return PLAN.blocks.filter(B=>!complete(B)).map(B=>{
+  return PLAN.blocks.filter(B=>!complete(B) && B.groups.some(g=>g.tasks.some(taskShown))).map(B=>{
     const at = a + B.off*60000;
     const first = B.groups[0] && B.groups[0].tasks[0] ? B.groups[0].tasks[0][1] : "";
     const body = B.headline === blockWho(B) ? short(B.groups.map(g=>g.tasks[0] ? g.tasks[0][1] : "").filter(Boolean).join(" Also: "), 200) : B.headline;
@@ -1417,6 +1456,7 @@ document.addEventListener("click", e=>{
     else if (act==="copyList") { const txt = listText(); (navigator.clipboard ? navigator.clipboard.writeText(txt) : Promise.reject()).then(()=>{ copyMsg = "Copied. Paste it into a note or a text."; render(); }, ()=>{ copyMsg = "Couldn't copy here. Long-press to select the list instead."; render(); }); }
     else if (act==="clearHave") { Object.keys(S.have).forEach(k=>sendCheck("have:"+k, false)); S.have = {}; save(); render(); }
     else if (act==="share") startShare();
+    else if (act==="showWho") { S.showWho = t.dataset.who; save(); const y = window.scrollY; render(); window.scrollTo(0,y); }
     else if (act==="alertsOn") enableAlerts();
     else if (act==="alertsOff") disableAlerts();
     else if (act==="alertTest") testAlert();
