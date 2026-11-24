@@ -608,7 +608,7 @@ function renderTools(){
   if (S.view === "list") { tools.innerHTML = `<button class="chip-btn" data-act="setup" type="button">Recipes</button><button class="chip-btn" data-act="cook" type="button">Cook view</button>`; return; }
   tools.innerHTML = `<button class="chip-btn" data-act="setup" type="button">Recipes</button>` + list
     + `<button class="chip-btn ${S.target?"set":""}" data-act="ready" type="button">${S.target ? "Eat "+fmt(S.target, true).replace(" today","") : "Eat at"}</button>`
-    + (anchor() ? `<button class="chip-btn" data-act="now" type="button">Now</button>` : "")
+    + (anchor() ? `<button class="chip-btn" data-act="now" type="button">Now</button><button class="chip-btn" data-act="catchup" type="button">Catch up</button>` : "")
     + `<button class="chip-btn" data-act="reset" type="button">Reset</button>`;
 }
 
@@ -824,6 +824,14 @@ function restoreMeal(text){
     S.done = {};
     Object.keys(savedDone).forEach(k=>{ if (!savedDone[k]) return; if (live.has(k)) S.done[k] = true; else sendCheck(k, false); });
     S.idx = 0; S.startAt = null;
+    /* A restore never clears checks: cancel any reset still waiting to go out, hold the kept checks on this
+       phone through polls, and re-send them after the restore's push so the server and other phones keep them. */
+    resetChecks = false;
+    if (S.share) {
+      const kept = Object.keys(S.done), until = Date.now() + 60000;
+      kept.forEach(k=>{ pending[k] = { on:true, until }; });
+      restoreResend = kept;
+    }
     save();
     mealRestoreOpen = false;
     const past = PLAN.startMs && PLAN.startMs < Date.now();
@@ -1112,6 +1120,9 @@ document.addEventListener("keydown", e=>{ if (e.key==="Escape") modal.classList.
    Each checkbox is sent on its own, so two people never overwrite each other.
    ============================================================ */
 const POLL_MS = 4000;
+/* restoreResend: checks a meal restore kept, re-sent to the server once the restore's plan push lands,
+   so a reset that was already queued or in flight can't leave the server (and then every phone) without them. */
+let restoreResend = null;
 let resetChecks = false, pushTimer = null, pushing = false, lastShared = "", syncErr = "", lastSync = 0, pollTimer = null, polling = false;
 const pending = {};  /* checkbox taps not yet confirmed by a poll */
 function sharedData(){ return { recipes:S.recipes, target:S.target, startAt:S.startAt, quiet:S.quiet, approved:S.approved }; }
@@ -1119,7 +1130,7 @@ function shareLink(){ return location.origin + location.pathname.replace(/index\
 function queuePush(){
   if (!S.share) return;
   const now = JSON.stringify(sharedData());
-  if (now === lastShared && !resetChecks) return;
+  if (now === lastShared && !resetChecks && !restoreResend) return;
   clearTimeout(pushTimer); pushTimer = setTimeout(pushNow, 500);
 }
 async function pushNow(){
@@ -1132,10 +1143,11 @@ async function pushNow(){
     const j = await res.json();
     if (!res.ok) throw new Error(j.error || "Couldn't sync.");
     S.share.rev = j.rev; lastShared = str; syncErr = ""; lastSync = Date.now();
+    if (restoreResend && !reset) { const ks = restoreResend; restoreResend = null; ks.forEach(k=>{ if (S.done[k]) sendCheck(k, true); }); }
     try { localStorage.setItem(KEY, JSON.stringify(S)); } catch(e) {}
   } catch(e) { syncErr = e.message || "Couldn't sync. Will keep trying."; if (reset) resetChecks = true; }
   pushing = false;
-  if (S.share && (JSON.stringify(sharedData()) !== lastShared || resetChecks)) queuePush();
+  if (S.share && (JSON.stringify(sharedData()) !== lastShared || resetChecks || restoreResend)) queuePush();
 }
 function sendCheck(task, on){
   if (!S.share) return;
@@ -1194,7 +1206,7 @@ async function startShare(){
     let j = null; try { j = await res.json(); } catch(e) {}
     if (!j) throw new Error("Sharing only works on the hosted site (pages.dev).");
     if (!res.ok) throw new Error(j.error);
-    S.share = { id:j.id, rev:j.rev }; lastShared = JSON.stringify(sharedData()); save();
+    S.share = { id:j.id, rev:j.rev }; lastShared = JSON.stringify(sharedData()); resetChecks = false; save();
     shareMsg = ""; startPolling(); render(); sendLink();
   } catch(e) { shareMsg = e.message || String(e); render(); }
 }
@@ -1210,7 +1222,7 @@ async function joinShare(id){
     let j = null; try { j = await res.json(); } catch(e) {}
     if (!j) throw new Error("Sharing only works on the hosted site (pages.dev).");
     if (!res.ok) throw new Error(j.error);
-    S.share = { id, rev:0 }; S.idx = 0; S.view = "setup";
+    S.share = { id, rev:0 }; S.idx = 0; S.view = "setup"; resetChecks = false;
     applyRemote(j);
     importMsg = "Joined the shared plan. Checkboxes and changes sync both ways."; importErr = false;
     save(); startPolling();
@@ -1364,6 +1376,17 @@ setInterval(()=>{
   showBanner(PLAN.blocks[hit], hit);
 }, 15000);
 if ("serviceWorker" in navigator) navigator.serviceWorker.addEventListener("message", e=>{ if (e.data && e.data.type === "rgp-now") jumpNow(); });
+/* Check off every task in every block that started before now (all owners, prep and Done for now included),
+   send each check to a shared plan, then jump to the current block. */
+function catchUp(){
+  const a = anchor(); if (!a) return;
+  const now = Date.now();
+  PLAN.blocks.forEach(B=>{
+    if (a + B.off*60000 >= now) return;
+    B.groups.forEach(g=>g.tasks.forEach(t=>{ if (!S.done[t[0]]) { S.done[t[0]] = true; sendCheck(t[0], true); } }));
+  });
+  save(); jumpNow();
+}
 function jumpNow(){
   const a = anchor(); if (!a) return;
   const el = (Date.now() - a)/60000; let pick = 0;
@@ -1503,6 +1526,7 @@ document.addEventListener("click", e=>{
       PLAN.blocks.forEach((b,i)=>{ if (el >= b.off) pick = i; });
       go(pick);
     }
+    else if (act==="catchup") ask("Check off every step scheduled before now?", "Catch up", catchUp);
     else if (act==="ready") ask(`<label for="rt" style="display:block;margin-bottom:8px;color:var(--muted)">Eat at</label><input class="field" type="datetime-local" id="rt" step="300" style="color-scheme:dark;font-size:18px" value="${S.target ? dtLocal(S.target) : ""}">`, "Set", ()=>{ setReady(document.getElementById("rt").value); });
     else if (act==="reset") ask("Clear every checkbox and stop the clock? Your recipes and ready time stay.", "Reset", ()=>{ S.done = {}; S.startAt = null; S.idx = 0; resetChecks = true; save(); render(); });
     return;
