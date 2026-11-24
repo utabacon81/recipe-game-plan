@@ -456,7 +456,9 @@ function recipeSchedule(r, ctx){
     blocks.push({ x:b, dur:0, kind:"advance", ings:[{ raw:scaleLine(p.raw, k), prepped:false, again:false }], key,
       tasks:[[r.id+":a:"+p.i, "Start ahead. " + cap(p.name) + ": " + p.prep, "Needs about " + fmtDur(dur) + " before it's used." + note]] });
   });
-  if (!servedInSteps) blocks.push({ x:0, dur:0, kind:"serve", ings:[], tasks:[[r.id+":s", isPrepRecipe(r) ? "Done for now. Store as directed." : "Plate and serve", ""]] });
+  /* Only recipes that finish at the meal get an automatic Plate and serve block. Prep recipes with their own
+     earlier ready-by just end with their last step. */
+  if (!servedInSteps && !isPrepRecipe(r)) blocks.push({ x:0, dur:0, kind:"serve", ings:[], tasks:[[r.id+":s", "Plate and serve", ""]] });
   const pitems = prepItems(r);
   const pm = pitems.length ? prepMin(r) : 0;
   return {
@@ -533,7 +535,9 @@ function buildPlan(){
   });
   per.forEach(({r,p,d})=>p.blocks.forEach(bl=>all.push(Object.assign({ r }, bl, { x: bl.x + d }))));
   const xs = all.map(a=>a.x);
-  const start = xs.length ? Math.min(...xs) : 0, endX = xs.length ? Math.max(...xs) : 0;
+  /* The plan ends at the latest recipe ready-by (or block), not the last block start, now that prep recipes have no end block. */
+  const ends = per.map(x=>x.d);
+  const start = xs.length ? Math.min(...xs) : 0, endX = Math.max(...(xs.length ? xs : [0]), ...(ends.length ? ends : [0]));
   const byOff = new Map();
   all.forEach(b=>{
     const off = Math.max(0, Math.round(b.x - start));
